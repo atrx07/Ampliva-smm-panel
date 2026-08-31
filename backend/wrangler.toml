@@ -1,0 +1,8 @@
+name = "ampliva-api"
+main = "src/index.ts"
+compatibility_date = "2026-08-31"
+
+[vars]
+CID_API_URL = "https://cidgrowthmedia.com/api/v2"
+CID_CURRENCY = "INR"
+DEFAULT_MARKUP_PERCENT = "35"
