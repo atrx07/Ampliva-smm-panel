@@ -14,6 +14,7 @@ app.get('/api/health', (c) => {
   return c.json({
     ok: true,
     service: 'ampliva-api',
+    providerConfigured: Boolean(c.env.CID_API_KEY),
     timestamp: new Date().toISOString(),
   });
 });
