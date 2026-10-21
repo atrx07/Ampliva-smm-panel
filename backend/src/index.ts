@@ -200,7 +200,7 @@ app.post('/api/wallet/topups', async (c) => {
     notifyDiscord(
       c.env,
       '💰 New top-up request',
-      `**₹${round2(amount).toFixed(2)}** from ${user.email}\nUTR: \`${txnRef}\`\nVerify the UTR in your bank app, then approve: https://ampliva-store.pages.dev → Admin → Top-up requests`,
+      `₹${round2(amount).toFixed(2)} from ${user.email}\nUTR: \`${txnRef}\`\nVerify the UTR in your bank app, then approve: https://ampliva-store.pages.dev → Admin → Top-up requests`,
     ),
   );
   return c.json({ id, status: 'pending' }, 201);
