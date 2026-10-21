@@ -22,6 +22,7 @@ function detectPlatform(service: RawCidService): Platform {
 
 function cleanName(value: string) {
   return value
+    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, '')
     .replace(/\p{Extended_Pictographic}/gu, '')
     .replace(/[\[\]]/g, '')
     .replace(/\s*\|\s*/g, ' · ')
