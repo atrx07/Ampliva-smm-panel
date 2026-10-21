@@ -103,8 +103,13 @@ footer p { color: #666d7b; max-width: 600px; text-align: right; line-height: 1.5
 
 @media (max-width: 580px) {
   .app-shell { width: min(100% - 24px, 1180px); }
-  .nav-wrap { height: 68px; }
-  .ghost-button { display: none; }
+  .nav-wrap { height: auto; min-height: 64px; padding: 10px 0; gap: 10px; }
+  /* Ghost buttons carry core actions (Dashboard / Admin / Log out / Copy UPI
+     ID) since M2 — never hide them; shrink them to fit instead. */
+  nav { gap: 8px; }
+  nav .ghost-button { padding: 7px 11px; font-size: .82rem; }
+  .brand { font-size: 1rem; gap: 8px; }
+  .brand-mark { width: 26px; height: 26px; border-radius: 8px; }
   .hero { padding: 72px 0 60px; }
   .hero h1 { font-size: clamp(3rem, 16vw, 4.7rem); }
   .hero-grid, .service-grid, .steps { grid-template-columns: 1fr; }
@@ -179,3 +184,18 @@ td { padding: 10px 8px 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); v
 .upi-qr { background: #ffffff; padding: 10px; border-radius: 12px; line-height: 0; }
 .upi-pay-side { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; min-width: 200px; flex: 1; }
 .upi-pay-side .primary-button { text-decoration: none; }
+
+/* ---------- Mobile fixes (post-launch QA) ---------- */
+.table-wrap table { min-width: 600px; }
+@media (max-width: 580px) {
+  .dash { padding: 36px 0 64px; }
+  .panel { padding: 17px; }
+  .big-balance { font-size: 2rem; }
+  .modal-backdrop { padding: 10px; }
+  .modal { padding: 20px; border-radius: 15px; }
+  .upi-pay-box { justify-content: center; text-align: center; }
+  .upi-pay-side { min-width: 0; align-items: center; }
+  .section-heading .ghost-button { align-self: flex-start; }
+  .hero-actions .primary-button { padding: 12px 17px; }
+  th, td { padding-right: 12px; }
+}
