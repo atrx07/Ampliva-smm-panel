@@ -9,20 +9,19 @@ CID_CURRENCY = "INR"
 DEFAULT_MARKUP_PERCENT = "35"
 # Set ADMIN_EMAIL to your email so your account always has admin rights.
 # (The first account registered on a fresh database also becomes admin.)
-ADMIN_EMAIL = ""
+ADMIN_EMAIL = "arppithandrewsee@gmail.com"
 # Public UPI ID customers send manual top-ups to, e.g. "yourname@okhdfcbank".
 # Leave empty to keep manual top-ups disabled.
-PUBLIC_UPI_ID = ""
+PUBLIC_UPI_ID = "arppithandrewsee@okaxis"
 SESSION_TTL_DAYS = "30"
 
 # D1 catalogue / accounts / wallet / orders database.
-# DEPLOY STEP: create the real database (`npx wrangler d1 create ampliva-db`
-# or the Cloudflare dashboard) and replace database_id with its UUID, then run
-# `npx wrangler d1 migrations apply ampliva-db --remote`.
+# ampliva-db created in the owner's Cloudflare account on 2026-10-21;
+# schema lives in migrations/ (apply via D1 console paste or wrangler).
 [[d1_databases]]
 binding = "DB"
 database_name = "ampliva-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "f03b50d9-ece5-4509-9885-656030ebe42e"
 migrations_dir = "migrations"
 
 # Daily catalogue sync at 03:17 UTC.
