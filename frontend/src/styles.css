@@ -97,7 +97,7 @@ footer p { color: #666d7b; max-width: 600px; text-align: right; line-height: 1.5
 @media (max-width: 850px) {
   nav a { display: none; }
   .hero { padding-top: 82px; }
-  .hero-grid, .service-grid, .steps { grid-template-columns: 1fr 1fr; }
+  .hero-grid, .service-grid, .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .section-heading { align-items: start; flex-direction: column; }
 }
 
@@ -112,7 +112,7 @@ footer p { color: #666d7b; max-width: 600px; text-align: right; line-height: 1.5
   .brand-mark { width: 26px; height: 26px; border-radius: 8px; }
   .hero { padding: 72px 0 60px; }
   .hero h1 { font-size: clamp(3rem, 16vw, 4.7rem); }
-  .hero-grid, .service-grid, .steps { grid-template-columns: 1fr; }
+  .hero-grid, .service-grid, .steps { grid-template-columns: minmax(0, 1fr); }
   .catalog-section, .how-section { padding: 65px 0; }
   footer { align-items: flex-start; flex-direction: column; }
   footer p { text-align: left; }
@@ -174,8 +174,8 @@ td { padding: 10px 8px 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); v
 .cell-input { width: 100%; min-width: 180px; border: 1px solid transparent; background: transparent; color: white; border-radius: 8px; padding: 6px 8px; }
 .cell-input:focus { border-color: rgba(181,168,255,.45); outline: 0; background: var(--panel); }
 .cell-input.narrow { min-width: 70px; width: 70px; }
-@media (max-width: 850px) { .dash-grid, .stat-grid { grid-template-columns: 1fr 1fr; } nav .balance-chip { display: none; } }
-@media (max-width: 580px) { .dash-grid, .stat-grid { grid-template-columns: 1fr; } }
+@media (max-width: 850px) { .dash-grid, .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } nav .balance-chip { display: none; } }
+@media (max-width: 580px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- UPI top-up box ---------- */
 .steps-list { margin: 0 0 14px; padding-left: 20px; color: var(--muted); display: grid; gap: 5px; font-size: 14.5px; }
@@ -198,4 +198,40 @@ td { padding: 10px 8px 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); v
   .section-heading .ghost-button { align-self: flex-start; }
   .hero-actions .primary-button { padding: 12px 17px; }
   th, td { padding-right: 12px; }
+}
+
+/* ---------- Mobile audit v2: overflow root-cause + density ----------
+   The line-clamped card title reports a huge min-content width in WebKit;
+   combined with plain 1fr tracks (min-size: auto) each card inflated the
+   page to ~660px on phones. Tracks are minmax(0,1fr) everywhere now, cards
+   may shrink, and overflow-x is clipped as a final safety net. */
+html { -webkit-text-size-adjust: 100%; }
+body { overflow-x: clip; }
+.service-card { min-width: 0; }
+.service-card h3 { min-width: 0; overflow-wrap: break-word; }
+.platform-tabs { scrollbar-width: none; }
+.platform-tabs::-webkit-scrollbar { display: none; }
+.modal { max-height: 90dvh; }
+@media (max-width: 580px) {
+  /* Service cards: compact — 316 services shouldn't mean one card per screen */
+  .service-card { min-height: 0; padding: 16px; border-radius: 15px; }
+  .service-card h3 { margin: 12px 0 5px; font-size: .98rem; }
+  .card-topline { min-height: 24px; }
+  .price-row { padding-top: 14px; }
+  .price-row strong { font-size: 1.32rem; }
+  .limits { margin-top: 10px; }
+  .service-button { margin-top: 13px; padding: 12px; font-size: .92rem; }
+  .platform-tabs button { padding: 10px 14px; }
+  /* Steps: drop the desktop dead space */
+  .steps article { min-height: 0; padding: 18px; }
+  .steps h3 { margin: 26px 0 8px; }
+  .hero-grid article { padding: 18px; }
+  /* Admin stats are small numbers — two columns reads better than a tall stack */
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-grid article { padding: 14px; }
+  /* Bigger tap targets in tables; 16px inputs stop iOS focus-zoom */
+  .row-actions button, td button { padding: 8px 12px; }
+  .cell-input, .form-stack input, .search-field input { font-size: 16px; }
+  .cell-input { min-width: 130px; }
+  .cell-input.narrow { min-width: 64px; width: 64px; }
 }
