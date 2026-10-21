@@ -10,7 +10,7 @@
   provider cancellation, refill/cancel, admin stats/orders.
 
 ## Deploy checklist (one-time, needs the owner's Cloudflare account)
-1. `npx wrangler d1 create ampliva-db` → put the real `database_id` in `backend/wrangler.toml`.
+1. ~~`npx wrangler d1 create ampliva-db`~~ DONE 2026-10-21 in the dashboard; real `database_id` is in `backend/wrangler.toml`, schema applied via D1 console (`migrations/0001_console_paste.sql` — comment-free variant for console pasting).
 2. `npx wrangler d1 migrations apply ampliva-db --remote`.
 3. Set `[vars]`: `ADMIN_EMAIL`, `PUBLIC_UPI_ID`.
 4. `npx wrangler secret put CID_API_KEY` (owner's CID Growth Media key).
