@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "build": "tsc --noEmit --pretty false",
     "typecheck": "tsc --noEmit --pretty false"
   },
   "dependencies": {
