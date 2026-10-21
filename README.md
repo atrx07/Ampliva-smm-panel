@@ -2,7 +2,7 @@
 
 **Amplify your reach.**
 
-Ampliva is a website-first promotional-services storefront with a provider-agnostic backend. Milestone 1 connects a polished public catalogue to a server-side CID Growth Media adapter without exposing provider credentials to the browser.
+Ampliva is a website-first promotional-services storefront with a provider-agnostic backend. The public catalogue, customer accounts, wallet, ordering and admin panel are built (Milestones 1-3): a Cloudflare Worker API fronts a server-side CID Growth Media adapter, and provider credentials never reach the browser.
 
 ## Stack
 
@@ -10,7 +10,7 @@ Ampliva is a website-first promotional-services storefront with a provider-agnos
 - **Backend:** Cloudflare Worker + Hono + TypeScript
 - **Provider:** CID Growth Media through a private server-side adapter
 - **Hosting target:** Cloudflare Pages + Workers free tiers
-- **Database:** Cloudflare D1 planned for Milestone 2
+- **Database:** Cloudflare D1 (catalogue snapshots, users, sessions, wallet ledger, top-up requests, orders)
 
 ## Repository layout
 
@@ -22,16 +22,27 @@ Ampliva-smm-panel/
 └── package.json          # npm workspace root
 ```
 
-## Milestone 1
+## Milestones 1-3 (built)
 
-- Responsive Ampliva storefront shell
-- Searchable/filterable service catalogue
-- `/api/health` Worker endpoint
-- `/api/services` Worker endpoint
-- Read-only CID `services` integration
-- Server-side default markup calculation
+- Responsive Ampliva storefront with searchable/filterable service catalogue
+- `/api/health`, `/api/config`, `/api/services` Worker endpoints
+- CID `services` integration with server-side markup (35% default, per-service override)
 - Safe preview catalogue when no CID key is configured
-- No purchasing, payments, wallets or customer auth yet
+- **M2:** D1-backed catalogue - admin-triggered + daily scheduled sync, snapshots keep
+  curated display names/markups, services that vanish upstream are flagged, not deleted
+- **M3:** customer accounts (PBKDF2 + hashed session tokens), append-only wallet ledger,
+  manual UPI top-ups (customer submits UTR, admin approves, wallet credited),
+  ordering (balance checked, provider order placed *before* any debit, so a provider
+  rejection never charges the customer), status refresh with automatic refund of the
+  undelivered portion on provider cancellation, refill/cancel actions
+- Admin panel: stats (revenue, provider cost, gross margin, CID balance), catalogue sync,
+  service curation (rename, markup, visibility), top-up approvals, all orders
+
+## Payments note
+
+V1 uses manual UPI top-ups on purpose: no gateway KYC/fees before first revenue.
+A gateway (e.g. Razorpay) can replace the manual approval step later without
+touching the wallet ledger or ordering flow.
 
 ## Local development
 
@@ -77,6 +88,20 @@ Use `frontend` as the project root.
 - Node version: `22`
 
 Set `VITE_API_URL` to the deployed Worker URL once the backend exists.
+
+### Backend - database (one-time)
+
+```bash
+cd backend
+npx wrangler d1 create ampliva-db        # copy the printed database_id into wrangler.toml
+npx wrangler d1 migrations apply ampliva-db --remote
+```
+
+Then set the `[vars]` in `wrangler.toml`: `ADMIN_EMAIL` (your email - that account
+gets admin rights; the first account registered on a fresh database also becomes
+admin) and `PUBLIC_UPI_ID` (the UPI ID customers send top-ups to; leave empty to
+keep manual top-ups disabled). Deploy the Worker, then log in as admin and hit
+**Sync catalogue from CID** once to populate the store.
 
 ### Backend — Cloudflare Worker
 

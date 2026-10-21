@@ -7,6 +7,27 @@ keep_vars = true
 CID_API_URL = "https://cidgrowthmedia.com/api/v2"
 CID_CURRENCY = "INR"
 DEFAULT_MARKUP_PERCENT = "35"
+# Set ADMIN_EMAIL to your email so your account always has admin rights.
+# (The first account registered on a fresh database also becomes admin.)
+ADMIN_EMAIL = ""
+# Public UPI ID customers send manual top-ups to, e.g. "yourname@okhdfcbank".
+# Leave empty to keep manual top-ups disabled.
+PUBLIC_UPI_ID = ""
+SESSION_TTL_DAYS = "30"
+
+# D1 catalogue / accounts / wallet / orders database.
+# DEPLOY STEP: create the real database (`npx wrangler d1 create ampliva-db`
+# or the Cloudflare dashboard) and replace database_id with its UUID, then run
+# `npx wrangler d1 migrations apply ampliva-db --remote`.
+[[d1_databases]]
+binding = "DB"
+database_name = "ampliva-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# Daily catalogue sync at 03:17 UTC.
+[triggers]
+crons = ["17 3 * * *"]
 
 [secrets]
 required = ["CID_API_KEY"]
