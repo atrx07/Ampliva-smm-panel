@@ -171,3 +171,11 @@ td { padding: 10px 8px 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); v
 .cell-input.narrow { min-width: 70px; width: 70px; }
 @media (max-width: 850px) { .dash-grid, .stat-grid { grid-template-columns: 1fr 1fr; } nav .balance-chip { display: none; } }
 @media (max-width: 580px) { .dash-grid, .stat-grid { grid-template-columns: 1fr; } }
+
+/* ---------- UPI top-up box ---------- */
+.steps-list { margin: 0 0 14px; padding-left: 20px; color: var(--muted); display: grid; gap: 5px; font-size: 14.5px; }
+.steps-list strong { color: var(--text); }
+.upi-pay-box { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(255, 255, 255, 0.02); }
+.upi-qr { background: #ffffff; padding: 10px; border-radius: 12px; line-height: 0; }
+.upi-pay-side { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; min-width: 200px; flex: 1; }
+.upi-pay-side .primary-button { text-decoration: none; }

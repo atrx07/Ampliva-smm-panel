@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   adminApproveTopup,
   adminOrders,
@@ -427,6 +428,22 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
   const [txnRef, setTxnRef] = useState('');
   const [topupMsg, setTopupMsg] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const upiLink = config?.upiId
+    ? `upi://pay?pa=${encodeURIComponent(config.upiId)}&pn=Ampliva&cu=INR${amount >= 10 ? `&am=${amount}` : ''}`
+    : '';
+
+  async function copyUpiId() {
+    if (!config?.upiId) return;
+    try {
+      await navigator.clipboard.writeText(config.upiId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -485,10 +502,24 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
           <div className="big-balance">{wallet ? formatMoney(wallet.balance, currency) : '…'}</div>
           {config?.manualTopupsEnabled ? (
             <>
-              <p className="modal-sub">Send a UPI payment to <strong>{config.upiId}</strong>, then submit the transaction reference (UTR) here.</p>
+              <ol className="steps-list">
+                <li><strong>Pay</strong> — scan the QR or tap the button (any UPI app: GPay, PhonePe, Paytm).</li>
+                <li><strong>Copy the UTR</strong> from the payment receipt (12-digit reference).</li>
+                <li><strong>Submit it below</strong> — your balance lands after a quick verification.</li>
+              </ol>
+              <div className="upi-pay-box">
+                <div className="upi-qr"><QRCodeSVG value={upiLink} size={140} /></div>
+                <div className="upi-pay-side">
+                  <span className="muted">You are paying</span>
+                  <strong>{config.upiId}</strong>
+                  <button type="button" className="ghost-button" onClick={copyUpiId}>{copied ? 'Copied ✓' : 'Copy UPI ID'}</button>
+                  <a className="primary-button" href={upiLink}>Pay {amount >= 10 ? formatMoney(amount, currency) : ''} with UPI app</a>
+                  <span className="muted">The QR and button follow the amount you enter below.</span>
+                </div>
+              </div>
               <form onSubmit={submitTopup} className="form-stack">
                 <label>Amount (₹)<input type="number" min={10} max={100000} required value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></label>
-                <label>UPI transaction reference<input required value={txnRef} onChange={(e) => setTxnRef(e.target.value)} placeholder="e.g. 4321xxxxxxxx" /></label>
+                <label>UPI transaction reference (UTR)<input required value={txnRef} onChange={(e) => setTxnRef(e.target.value)} placeholder="e.g. 4321xxxxxxxx" /></label>
                 <button className="primary-button full" type="submit">Request top-up</button>
               </form>
               {topupMsg && <div className="notice">{topupMsg}</div>}
