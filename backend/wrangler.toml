@@ -30,3 +30,6 @@ crons = ["17 3 * * *"]
 
 [secrets]
 required = ["CID_API_KEY"]
+# Optional (dashboard-only, never in git): ADMIN_DISCORD_WEBHOOK — a Discord
+# webhook URL. When set, new top-up requests ping the owner instantly and the
+# daily cron re-pings about requests left pending over 4 hours.

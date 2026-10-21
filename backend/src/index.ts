@@ -4,6 +4,7 @@ import { listDbServices, normalizeServices, previewServices, retailFor, rowToPub
 import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
+import { notifyDiscord } from './notify';
 import type { Env, OrderRow, ServiceRow, UserRow } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -194,6 +195,14 @@ app.post('/api/wallet/topups', async (c) => {
     .prepare('INSERT INTO payment_requests (id, user_id, amount, method, txn_ref, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .bind(id, user.id, round2(amount), 'upi', txnRef, 'pending', new Date().toISOString())
     .run();
+  // Ping the owner immediately — an unnoticed request is a stranded customer.
+  c.executionCtx.waitUntil(
+    notifyDiscord(
+      c.env,
+      '💰 New top-up request',
+      `**₹${round2(amount).toFixed(2)}** from ${user.email}\nUTR: \`${txnRef}\`\nVerify the UTR in your bank app, then approve: https://ampliva-store.pages.dev → Admin → Top-up requests`,
+    ),
+  );
   return c.json({ id, status: 'pending' }, 201);
 });
 
@@ -486,6 +495,27 @@ app.onError((error, c) => {
 export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    if (env.DB) {
+      // Nag the owner about top-up requests left pending > 4h, so a customer
+      // is never stranded just because the dashboard went unchecked.
+      ctx.waitUntil((async () => {
+        try {
+          const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+          const rows = await env.DB!
+            .prepare("SELECT pr.amount AS amount, pr.created_at AS created_at, u.email AS email FROM payment_requests pr JOIN users u ON u.id = pr.user_id WHERE pr.status = 'pending' AND pr.created_at < ? ORDER BY pr.created_at ASC LIMIT 10")
+            .bind(cutoff)
+            .all<{ amount: number; created_at: string; email: string }>();
+          const pending = rows.results ?? [];
+          if (pending.length) {
+            const total = pending.reduce((sum, r) => sum + r.amount, 0);
+            const lines = pending.map((r) => `• ₹${r.amount.toFixed(2)} — ${r.email} (since ${r.created_at.slice(0, 16).replace('T', ' ')} UTC)`).join('\n');
+            await notifyDiscord(env, '⏰ Top-up requests still waiting', `${pending.length} request(s) pending over 4 hours, ₹${total.toFixed(2)} total:\n${lines}\nApprove them: https://ampliva-store.pages.dev → Admin`);
+          }
+        } catch (error) {
+          console.error('Stale top-up check failed:', error instanceof Error ? error.message : 'unknown');
+        }
+      })());
+    }
     // Daily catalogue sync (see wrangler.toml triggers) once D1 + key exist.
     if (!env.DB || !env.CID_API_KEY) return;
     const client = cidClientFromEnv(env);

@@ -8,6 +8,8 @@ export interface Env {
   ADMIN_EMAIL?: string;
   /** Public UPI ID customers send manual top-ups to. Shown on the wallet page. */
   PUBLIC_UPI_ID?: string;
+  /** Optional Discord webhook URL for owner notifications (secret; dashboard-only). */
+  ADMIN_DISCORD_WEBHOOK?: string;
   SESSION_TTL_DAYS?: string;
 }
 
