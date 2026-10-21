@@ -1,4 +1,4 @@
-import type { Platform, PublicService, RawCidService } from './types';
+import type { Platform, PublicService, RawCidService, ServiceRow } from './types';
 
 function asNumber(value: string | number | undefined, fallback = 0) {
   const parsed = Number(value);
@@ -52,6 +52,138 @@ export function normalizeServices(raw: RawCidService[], markupPercent: number): 
     })
     .filter((service) => service.rate > 0 && service.max > 0)
     .sort((a, b) => a.category.localeCompare(b.category) || a.rate - b.rate);
+}
+
+// --- Milestone 2: D1-backed catalogue ---
+
+export function rowToPublic(row: ServiceRow): PublicService {
+  return {
+    id: row.id,
+    name: row.display_name?.trim() || cleanName(row.provider_name),
+    category: row.category,
+    platform: row.platform,
+    rate: row.retail_rate,
+    min: row.min,
+    max: row.max,
+    refill: row.refill === 1,
+    cancel: row.cancel === 1,
+    description: row.description ?? undefined,
+  };
+}
+
+export function retailFor(providerRate: number, markupPercent: number): number {
+  return retailRate(providerRate, markupPercent);
+}
+
+/**
+ * Upserts the provider catalogue into D1, preserving admin curation
+ * (display_name, markup_override, is_active) across syncs. Services that
+ * vanish upstream are flagged provider_active = 0 instead of deleted, so
+ * order history keeps its context. Returns the number of live services.
+ */
+export async function syncCatalogToDb(
+  db: D1Database,
+  raw: RawCidService[],
+  defaultMarkup: number,
+): Promise<number> {
+  const now = new Date().toISOString();
+  const run = await db
+    .prepare('INSERT INTO sync_runs (started_at, status) VALUES (?, ?) RETURNING id')
+    .bind(now, 'running')
+    .first<{ id: number }>();
+  const runId = run?.id;
+
+  try {
+    const existing = await db
+      .prepare('SELECT id, markup_override FROM services')
+      .all<{ id: string; markup_override: number | null }>();
+    const overrides = new Map((existing.results ?? []).map((r) => [r.id, r.markup_override]));
+
+    const statements: D1PreparedStatement[] = [];
+    let live = 0;
+    for (const service of raw) {
+      const providerRate = asNumber(service.rate);
+      const max = asNumber(service.max);
+      if (providerRate <= 0 || max <= 0) continue;
+      const id = `svc_${service.service}`;
+      const markup = overrides.get(id) ?? defaultMarkup;
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO services (id, provider_id, provider_name, category, platform, provider_rate, retail_rate, min, max, refill, cancel, description, is_active, provider_active, first_seen_at, last_synced_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               provider_name = excluded.provider_name,
+               category = excluded.category,
+               platform = excluded.platform,
+               provider_rate = excluded.provider_rate,
+               retail_rate = excluded.retail_rate,
+               min = excluded.min,
+               max = excluded.max,
+               refill = excluded.refill,
+               cancel = excluded.cancel,
+               description = excluded.description,
+               provider_active = 1,
+               last_synced_at = excluded.last_synced_at`,
+          )
+          .bind(
+            id,
+            asNumber(service.service),
+            service.name || 'Promotional service',
+            service.category?.trim() || 'Other',
+            detectPlatform(service),
+            providerRate,
+            retailRate(providerRate, markup),
+            asNumber(service.min),
+            max,
+            asBoolean(service.refill) ? 1 : 0,
+            asBoolean(service.cancel) ? 1 : 0,
+            service.description?.trim() || null,
+            now,
+            now,
+          ),
+      );
+      live++;
+    }
+
+    // D1 batch limits: flush in chunks.
+    for (let i = 0; i < statements.length; i += 50) {
+      await db.batch(statements.slice(i, i + 50));
+    }
+
+    await db
+      .prepare('UPDATE services SET provider_active = 0 WHERE last_synced_at < ?')
+      .bind(now)
+      .run();
+
+    if (runId) {
+      await db
+        .prepare('UPDATE sync_runs SET finished_at = ?, status = ?, service_count = ? WHERE id = ?')
+        .bind(new Date().toISOString(), 'ok', live, runId)
+        .run();
+    }
+    return live;
+  } catch (error) {
+    if (runId) {
+      await db
+        .prepare('UPDATE sync_runs SET finished_at = ?, status = ?, error = ? WHERE id = ?')
+        .bind(new Date().toISOString(), 'error', error instanceof Error ? error.message : 'unknown', runId)
+        .run();
+    }
+    throw error;
+  }
+}
+
+export async function listDbServices(db: D1Database): Promise<{ services: PublicService[]; updatedAt: string | null }> {
+  const rows = await db
+    .prepare(
+      `SELECT * FROM services WHERE is_active = 1 AND provider_active = 1 AND retail_rate > 0
+       ORDER BY category ASC, retail_rate ASC`,
+    )
+    .all<ServiceRow>();
+  const results = rows.results ?? [];
+  const updatedAt = results.length ? results.reduce((max, r) => (r.last_synced_at > max ? r.last_synced_at : max), results[0].last_synced_at) : null;
+  return { services: results.map(rowToPublic), updatedAt };
 }
 
 export const previewServices: PublicService[] = [
