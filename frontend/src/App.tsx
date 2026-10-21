@@ -373,7 +373,10 @@ function OrderModal({ service, currency, balance, onClose, onOrdered }: {
   onOrdered: (newBalance: number) => void;
 }) {
   const [link, setLink] = useState('');
-  const [quantity, setQuantity] = useState(service.min || 100);
+  // Keep the raw text in state and parse for math: a numeric state turns an
+  // emptied field into a stuck leading "0" the user can never backspace away.
+  const [quantityText, setQuantityText] = useState(String(service.min || 100));
+  const quantity = Math.max(0, Math.floor(Number(quantityText) || 0));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const charge = Math.round(((service.rate * quantity) / 1000) * 100) / 100;
@@ -399,7 +402,7 @@ function OrderModal({ service, currency, balance, onClose, onOrdered }: {
         <p className="modal-sub">{formatMoney(service.rate, currency)} / 1K · Min {formatNumber(service.min)} · Max {formatNumber(service.max)}</p>
         <form onSubmit={submit} className="form-stack">
           <label>Link to promote<input required value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://instagram.com/…" /></label>
-          <label>Quantity<input required type="number" min={service.min} max={service.max} value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /></label>
+          <label>Quantity<input required type="number" inputMode="numeric" min={service.min} max={service.max} value={quantityText} onChange={(e) => setQuantityText(e.target.value)} placeholder={String(service.min)} /></label>
           <div className="charge-row">
             <span>Total charge</span><strong>{formatMoney(charge, currency)}</strong>
           </div>
@@ -424,7 +427,9 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [amount, setAmount] = useState(100);
+  // Raw text state, parsed via `amount` — same leading-zero trap as quantity.
+  const [amountText, setAmountText] = useState('100');
+  const amount = Math.max(0, Math.floor(Number(amountText) || 0));
   const [txnRef, setTxnRef] = useState('');
   const [topupMsg, setTopupMsg] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -518,7 +523,7 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
                 </div>
               </div>
               <form onSubmit={submitTopup} className="form-stack">
-                <label>Amount (₹)<input type="number" min={10} max={100000} required value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></label>
+                <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
                 <label>UPI transaction reference (UTR)<input required value={txnRef} onChange={(e) => setTxnRef(e.target.value)} placeholder="e.g. 4321xxxxxxxx" /></label>
                 <button className="primary-button full" type="submit">Request top-up</button>
               </form>
