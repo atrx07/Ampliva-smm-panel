@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { displayCategory } from '../lib/categories';
 import { FEATURED_IDS } from '../lib/featured';
 import { formatMoney, formatNumber, platformLabels } from '../lib/format';
 import type { Platform, Service, ServicesResponse } from '../types';
@@ -25,7 +26,7 @@ function ServiceCard({ service, currency, user, onOrderClick }: {
         {service.refill && <span className="refill-chip">Refill</span>}
       </div>
       <h3>{service.name}</h3>
-      <p className="category">{service.category}</p>
+      <p className="category">{displayCategory(service.category)}</p>
       <div className="price-row">
         <strong>{formatMoney(service.rate, currency)}</strong>
         <span>/ 1K</span>
@@ -66,7 +67,7 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
   const categories = useMemo(() => {
     const names = new Set<string>();
     for (const service of services) {
-      if (platform === 'all' || service.platform === platform) names.add(service.category);
+      if (platform === 'all' || service.platform === platform) names.add(displayCategory(service.category));
     }
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [services, platform]);
@@ -82,8 +83,8 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
     const needle = query.trim().toLowerCase();
     const filtered = services.filter((service) => {
       const matchesPlatform = platform === 'all' || service.platform === platform;
-      const matchesCategory = category === 'all' || service.category === category;
-      const matchesQuery = !needle || `${service.name} ${service.category}`.toLowerCase().includes(needle);
+      const matchesCategory = category === 'all' || displayCategory(service.category) === category;
+      const matchesQuery = !needle || `${service.name} ${service.category} ${displayCategory(service.category)}`.toLowerCase().includes(needle);
       return matchesPlatform && matchesCategory && matchesQuery;
     });
     const rank = new Map(FEATURED_IDS.map((id, index) => [id, index]));
