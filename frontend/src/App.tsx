@@ -39,6 +39,13 @@ import type {
   WalletResponse,
 } from './types';
 
+// PARKED 2026-10-24: Razorpay instant payments run on test keys only until live KYC
+// clears (physical PAN reprint -> Video KYC -> live keys). While parked, the wallet
+// shows a Coming soon banner instead of the instant-pay box, so no customer can
+// walk into a test-mode checkout. To resume: set this to false (live keys must be
+// in the Worker secrets first).
+const RAZORPAY_PARKED = true;
+
 const platformLabels: Record<Platform | 'all', string> = {
   all: 'All services',
   instagram: 'Instagram',
@@ -560,7 +567,12 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
           {(config?.manualTopupsEnabled || config?.razorpayEnabled) && (
             <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
           )}
-          {config?.razorpayEnabled && (
+          {RAZORPAY_PARKED ? (
+            <div className="instant-pay-box">
+              <strong>⚡ Instant top-up — coming soon</strong>
+              <p className="modal-sub">Cards, UPI and netbanking with automatic credit are on the way. For now, top up with manual UPI below.</p>
+            </div>
+          ) : config?.razorpayEnabled && (
             <div className="instant-pay-box">
               <strong>⚡ Instant top-up</strong>
               <p className="modal-sub">Pay by card, UPI or netbanking — your balance credits automatically, no waiting for verification.</p>

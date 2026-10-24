@@ -11,6 +11,13 @@ a redeploy when secrets change (only the D1 migration needs a console paste).
 2. Website field: `https://ampliva-store.pages.dev`.
 3. Stay in **Test Mode** until step 4 passes — test keys work before KYC
    approval, live keys only after.
+4. Video KYC gotcha (verified 2026-10-24): e-PAN is legally valid and fine
+   for document uploads, but the live Video KYC call specifically requires
+   showing the *original physical* PAN card on camera — digital/e-PAN
+   images are not accepted on video calls. If you only hold an e-PAN,
+   order a physical reprint first (Protean/UTIITSL "Reprint PAN Card",
+   ₹50 flat domestic delivery) and do Video KYC when it arrives. Test
+   Mode is unaffected — grab test keys and test the integration meanwhile.
 
 ## 2. D1 migration (one paste)
 
