@@ -71,7 +71,7 @@ nav a:hover { color: white; }
 .service-row.open { border-color: rgba(181, 168, 255, .35); background: var(--panel-strong); }
 .service-row-head { width: 100%; display: flex; align-items: center; gap: 10px; background: transparent; border: 0; color: inherit; padding: 13px 14px; cursor: pointer; text-align: left; min-width: 0; }
 .row-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .92rem; }
-.type-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; font-size: .68rem; font-weight: 700; color: #9da3b2; background: rgba(255,255,255,.05); white-space: nowrap; }
+.speed-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; font-size: .68rem; font-weight: 700; color: #9da3b2; background: rgba(255,255,255,.05); white-space: nowrap; }
 .row-price { white-space: nowrap; font-size: .92rem; }
 .row-price span { color: #7e8492; font-size: .72rem; }
 .row-chevron { color: #7e8492; font-size: .8rem; }
@@ -223,7 +223,7 @@ body { overflow-x: clip; }
   /* Service rows: keep the banner tight on phones */
   .service-row-head { padding: 12px; gap: 8px; }
   .row-name { font-size: .85rem; }
-  .type-chip { font-size: .62rem; padding: 3px 7px; }
+  .speed-chip { font-size: .62rem; padding: 3px 7px; }
   .row-price { font-size: .85rem; }
   .service-row-body { padding: 14px; }
   .service-button { padding: 12px; font-size: .92rem; }

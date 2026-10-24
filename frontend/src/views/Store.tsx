@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { displayCategory, sortCategories } from '../lib/categories';
 import { FEATURED_IDS } from '../lib/featured';
 import { formatMoney, formatNumber, platformLabels } from '../lib/format';
+import { chipLabel, shortService } from '../lib/shortTitle';
 import type { Platform, Service, ServicesResponse } from '../types';
 
 type SortKey = 'featured' | 'price-asc' | 'price-desc' | 'min-asc';
@@ -13,38 +14,11 @@ const SORT_LABELS: Record<SortKey, string> = {
   'min-asc': 'Minimum: low to high',
 };
 
-// Best-effort type badge from the service name ("Views", "Likes", ...).
-// First keyword wins; names that match nothing fall back to "Service".
-const TYPE_KEYWORDS: Array<[string, string]> = [
-  ['subscriber', 'Subscribers'],
-  ['follower', 'Followers'],
-  ['member', 'Members'],
-  ['like', 'Likes'],
-  ['view', 'Views'],
-  ['comment', 'Comments'],
-  ['share', 'Shares'],
-  ['reaction', 'Reactions'],
-  ['impression', 'Impressions'],
-  ['reach', 'Reach'],
-  ['save', 'Saves'],
-  ['download', 'Downloads'],
-  ['vote', 'Votes'],
-  ['traffic', 'Traffic'],
-  ['boost', 'Boost'],
-  ['watch', 'Watch time'],
-];
-
-function serviceType(name: string): string {
-  const lower = name.toLowerCase();
-  for (const [keyword, label] of TYPE_KEYWORDS) {
-    if (lower.includes(keyword)) return label;
-  }
-  return 'Service';
-}
-
-// Compact accordion row: a one-line banner (platform, name, type, price)
-// that expands into the full details + buy button. The page holds a single
-// openId, so expanding one row always collapses whatever was open.
+// Compact accordion row: a one-line banner (platform chip, short service
+// label, speed, price) that expands into the full details + buy button.
+// The collapsed label is a summary — the expanded view keeps the full
+// provider name. The page holds a single openId, so expanding one row
+// always collapses whatever was open.
 function ServiceRow({ service, currency, user, open, onToggle, onOrderClick }: {
   service: Service;
   currency: string;
@@ -53,12 +27,13 @@ function ServiceRow({ service, currency, user, open, onToggle, onOrderClick }: {
   onToggle: () => void;
   onOrderClick: (service: Service) => void;
 }) {
+  const short = shortService(service);
   return (
     <article className={`service-row${open ? ' open' : ''}`}>
       <button type="button" className="service-row-head" onClick={onToggle} aria-expanded={open}>
-        <span className="platform-chip">{platformLabels[service.platform]}</span>
-        <span className="row-name">{service.name}</span>
-        <span className="type-chip">{serviceType(service.name)}</span>
+        <span className="platform-chip">{chipLabel(service)}</span>
+        <span className="row-name">{short.label}</span>
+        {short.speed && <span className="speed-chip">{short.speed}</span>}
         <span className="row-price"><strong>{formatMoney(service.rate, currency)}</strong><span> /1K</span></span>
         <span className="row-chevron" aria-hidden="true">{open ? '▴' : '▾'}</span>
       </button>
