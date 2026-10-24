@@ -8,8 +8,9 @@ import {
   setToken,
 } from './api';
 import { AuthModal } from './components/AuthModal';
+import { Icon } from './components/icons';
 import { OrderModal } from './components/OrderModal';
-import { formatMoney } from './lib/format';
+import { SideMenu } from './components/SideMenu';
 import { useRoute } from './lib/router';
 import { Admin } from './views/Admin';
 import { Dashboard } from './views/Dashboard';
@@ -27,6 +28,10 @@ function App() {
   const [balance, setBalance] = useState<number | null>(null);
   const [route, navigate] = useRoute();
   const [authOpen, setAuthOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Dashboard panel the menu should scroll to after navigating ('profile',
+  // 'wallet', 'orders', or null for the top of the page).
+  const [dashSection, setDashSection] = useState<string | null>(null);
   const [orderService, setOrderService] = useState<Service | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -72,10 +77,19 @@ function App() {
     setOrderService(service);
   }
 
-  function goHow(event: React.MouseEvent) {
-    event.preventDefault();
+  function goHow(event?: React.MouseEvent) {
+    event?.preventDefault();
+    setMenuOpen(false);
     navigate('/');
     window.setTimeout(() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' }), 60);
+  }
+
+  // Menu navigation: close the drawer, remember the dashboard panel to
+  // scroll to (if any), then navigate.
+  function goMenu(path: string, section: string | null = null) {
+    setDashSection(section);
+    setMenuOpen(false);
+    navigate(path);
   }
 
   function go(path: string) {
@@ -92,23 +106,24 @@ function App() {
           <span className="brand-mark">A</span>
           <span>Ampliva</span>
         </a>
-        <nav>
-          <a href="/store" onClick={go('/store')}>Store</a>
-          <a href="/#how" onClick={goHow}>How it works</a>
-          {user ? (
-            <>
-              <span className="balance-chip">{formatMoney(balance ?? 0, currency)}</span>
-              <button className="ghost-button" type="button" onClick={() => navigate('/dashboard')}>Dashboard</button>
-              {user.role === 'admin' && (
-                <button className="ghost-button" type="button" onClick={() => navigate('/admin')}>Admin</button>
-              )}
-              <button className="ghost-button" type="button" onClick={handleLogout}>Log out</button>
-            </>
-          ) : (
-            <button className="ghost-button" type="button" onClick={() => setAuthOpen(true)}>Log in / Sign up</button>
-          )}
-        </nav>
+        <button className="menu-button" type="button" onClick={() => setMenuOpen(true)} aria-label="Open menu" aria-expanded={menuOpen}>
+          <Icon name="menu" size={22} />
+        </button>
       </header>
+
+      <SideMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        user={user}
+        balance={balance}
+        currency={currency}
+        route={route}
+        section={dashSection}
+        go={goMenu}
+        goHow={() => goHow()}
+        onLogin={() => { setMenuOpen(false); setAuthOpen(true); }}
+        onLogout={() => { setMenuOpen(false); handleLogout(); }}
+      />
 
       {notice && <div className="notice top-notice">{notice} <button className="link-button" onClick={() => setNotice(null)}>Dismiss</button></div>}
 
@@ -137,6 +152,8 @@ function App() {
           config={config}
           onBalanceChange={setBalance}
           onBrowse={() => navigate('/store')}
+          user={user}
+          section={dashSection}
         />
       ) : (
         <main className="dash">

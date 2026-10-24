@@ -10,7 +10,7 @@ import {
   refreshOrder,
 } from '../api';
 import { formatDate, formatMoney, formatNumber } from '../lib/format';
-import type { Order, PublicConfig, WalletResponse } from '../types';
+import type { AuthUser, Order, PublicConfig, WalletResponse } from '../types';
 
 // PARKED 2026-10-24: Razorpay instant payments run on test keys only until live KYC
 // clears (physical PAN reprint -> Video KYC -> live keys). While parked, the wallet
@@ -19,12 +19,24 @@ import type { Order, PublicConfig, WalletResponse } from '../types';
 // in the Worker secrets first).
 const RAZORPAY_PARKED = true;
 
-export function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
+export function Dashboard({ currency, config, onBalanceChange, onBrowse, user, section }: {
   currency: string;
   config: PublicConfig | null;
   onBalanceChange: (balance: number) => void;
   onBrowse: () => void;
+  user: AuthUser | null;
+  section: string | null;
 }) {
+  // The side menu points at panels on this page (profile, wallet, orders).
+  // Scroll to the requested panel after navigation lands.
+  useEffect(() => {
+    if (!section) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [section]);
+
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -153,8 +165,16 @@ export function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
       </div>
       {error && <div className="notice error">{error}</div>}
 
+      {user && (
+        <article className="panel profile-panel" id="profile">
+          <h3>Profile</h3>
+          <span>{user.email}</span>
+          <span className="role-chip">{user.role === 'admin' ? 'Admin' : 'Member'}</span>
+        </article>
+      )}
+
       <div className="dash-grid">
-        <article className="panel">
+        <article className="panel" id="wallet">
           <h3>Wallet balance</h3>
           <div className="big-balance">{wallet ? formatMoney(wallet.balance, currency) : '…'}</div>
           {(config?.manualTopupsEnabled || config?.razorpayEnabled) && (
@@ -225,7 +245,7 @@ export function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
         </article>
       </div>
 
-      <article className="panel wide">
+      <article className="panel wide" id="orders">
         <h3>Your orders</h3>
         {!orders.length && <p className="modal-sub">No orders yet — pick a service from the catalogue to place your first one.</p>}
         <div className="table-wrap">
