@@ -17,8 +17,8 @@ const SORT_LABELS: Record<SortKey, string> = {
 // Compact accordion row: a one-line banner (platform chip, short service
 // label, speed, price) that expands into the full details + buy button.
 // The collapsed label is a summary — the expanded view keeps the full
-// provider name. The page holds a single openId, so expanding one row
-// always collapses whatever was open.
+// provider name. The page holds a single open key (section + id), so
+// expanding one row always collapses whatever was open.
 function ServiceRow({ service, currency, user, open, onToggle, onOrderClick }: {
   service: Service;
   currency: string;
@@ -67,7 +67,11 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
   const [platform, setPlatform] = useState<Platform | 'all'>('all');
   const [category, setCategory] = useState('all');
   const [sort, setSort] = useState<SortKey>('featured');
-  const [openId, setOpenId] = useState<string | null>(null);
+  // Open state is scoped per section ("featured:<id>" vs "list:<id>"):
+  // heroes render twice on the page (featured shelf + main list), and a
+  // bare service id opened BOTH copies at once. When the twin sat above
+  // the viewport, its growth dropped the visible list down the screen.
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
   const services = catalog?.services ?? [];
 
@@ -115,16 +119,17 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
   function pickPlatform(item: Platform | 'all') {
     setPlatform(item);
     setCategory('all');
-    setOpenId(null);
+    setOpenKey(null);
   }
 
   function pickCategory(name: string) {
     setCategory(name);
-    setOpenId(null);
+    setOpenKey(null);
   }
 
-  function toggleRow(id: string) {
-    setOpenId((current) => (current === id ? null : id));
+  function toggleRow(section: 'featured' | 'list', id: string) {
+    const key = `${section}:${id}`;
+    setOpenKey((current) => (current === key ? null : key));
   }
 
   return (
@@ -202,14 +207,14 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
                 <p className="modal-sub">The services most customers start with — clear names, sane minimums, refill where it matters.</p>
                 <div className="service-list">
                   {featured.map((service) => (
-                    <ServiceRow key={service.id} service={service} currency={currency} user={user} open={openId === service.id} onToggle={() => toggleRow(service.id)} onOrderClick={onOrderClick} />
+                    <ServiceRow key={service.id} service={service} currency={currency} user={user} open={openKey === `featured:${service.id}`} onToggle={() => toggleRow('featured', service.id)} onOrderClick={onOrderClick} />
                   ))}
                 </div>
               </section>
             )}
             <div className="service-list">
               {visibleServices.map((service: Service) => (
-                <ServiceRow key={service.id} service={service} currency={currency} user={user} open={openId === service.id} onToggle={() => toggleRow(service.id)} onOrderClick={onOrderClick} />
+                <ServiceRow key={service.id} service={service} currency={currency} user={user} open={openKey === `list:${service.id}`} onToggle={() => toggleRow('list', service.id)} onOrderClick={onOrderClick} />
               ))}
               {!visibleServices.length && !error && (
                 <div className="empty-state">No services match that search yet.</div>
