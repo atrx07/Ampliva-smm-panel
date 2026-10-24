@@ -246,3 +246,23 @@ body { overflow-x: clip; }
 /* Instant (Razorpay) top-up box — sits above the manual UPI flow */
 .instant-pay-box { border: 1px solid rgba(47, 191, 113, .45); background: rgba(47, 191, 113, .08); border-radius: 12px; padding: 14px; margin: 12px 0; }
 .instant-pay-box p { margin: 6px 0 12px; }
+
+/* ---------- Store page: category/sort toolbar, featured row, landing FAQ --- */
+.store-toolbar { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.select-field { display: grid; gap: 6px; font-size: .78rem; color: #9da3b2; min-width: 0; }
+.select-field select { height: 48px; min-width: 200px; max-width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: 13px; color: white; padding: 0 12px; outline: 0; font-size: 16px; }
+.select-field select:focus { border-color: rgba(181,168,255,.45); }
+.result-count { margin-left: auto; color: #757c8c; font-size: .85rem; padding-bottom: 14px; white-space: nowrap; }
+.featured-section { margin-bottom: 44px; }
+.featured-section h3 { margin: 0 0 6px; font-size: 1.4rem; letter-spacing: -.03em; }
+.featured-section .modal-sub { margin-bottom: 18px; }
+.faq-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.faq-item { padding: 22px; border: 1px solid var(--line); border-radius: 17px; background: rgba(255,255,255,.025); min-width: 0; }
+.faq-item h3 { margin: 0 0 8px; font-size: 1.15rem; letter-spacing: -.02em; }
+.faq-item p { margin: 0; color: var(--muted); line-height: 1.6; font-size: .9rem; }
+@media (max-width: 850px) {
+  .faq-list { grid-template-columns: minmax(0, 1fr); }
+  .select-field select { min-width: 0; width: 100%; }
+  .select-field { flex: 1 1 160px; }
+  .result-count { margin-left: 0; padding-bottom: 0; }
+}
