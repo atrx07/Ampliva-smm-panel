@@ -56,13 +56,20 @@ export class CIDClient {
     return { balance: Number(payload.balance ?? 0), currency: String(payload.currency ?? '') };
   }
 
-  /** Creates an order at the provider. Returns the provider order id. */
-  async addOrder(serviceId: number, link: string, quantity: number): Promise<string> {
+  /**
+   * Creates an order at the provider. Returns the provider order id.
+   * `extras` carries the type-specific parameters (comments, usernames,
+   * groups, hashtag, answer_number, keywords, runs, interval) — only the
+   * keys the caller validated are included. URL-encoding carries the
+   * newlines in multi-line fields (comments, usernames, groups).
+   */
+  async addOrder(serviceId: number, link: string, quantity: number, extras: Record<string, string> = {}): Promise<string> {
     const payload = await this.request({
       action: 'add',
       service: String(serviceId),
       link,
       quantity: String(quantity),
+      ...extras,
     }) as { order?: string | number; error?: string };
     const err = CIDClient.errorOf(payload);
     if (err) throw new Error(err);

@@ -141,6 +141,11 @@ footer p { color: #666d7b; max-width: 600px; text-align: right; line-height: 1.5
 .form-stack label { display: grid; gap: 6px; font-size: .82rem; color: #b9bec9; }
 .form-stack input { height: 44px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 0 12px; color: white; outline: 0; width: 100%; }
 .form-stack input:focus { border-color: rgba(181,168,255,.45); }
+.form-stack textarea { min-height: 110px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 12px; color: white; outline: 0; width: 100%; resize: vertical; font: inherit; }
+.form-stack textarea:focus { border-color: rgba(181,168,255,.45); }
+.field-hint { font-size: .78rem; color: #757c8c; }
+.description-box { white-space: pre-wrap; overflow-wrap: break-word; color: var(--muted); font-size: .85rem; line-height: 1.55; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 0 0 4px; }
+.service-description { white-space: pre-wrap; overflow-wrap: break-word; color: var(--muted); font-size: .85rem; line-height: 1.55; margin: 0; }
 .primary-button.full { width: 100%; justify-content: center; border: 0; cursor: pointer; }
 .primary-button:disabled { opacity: .55; }
 .modal .link-button { margin-top: 14px; }
@@ -237,7 +242,7 @@ body { overflow-x: clip; }
   .stat-grid article { padding: 14px; }
   /* Bigger tap targets in tables; 16px inputs stop iOS focus-zoom */
   .row-actions button, td button { padding: 8px 12px; }
-  .cell-input, .form-stack input, .search-field input { font-size: 16px; }
+  .cell-input, .form-stack input, .form-stack textarea, .search-field input { font-size: 16px; }
   .cell-input { min-width: 130px; }
   .cell-input.narrow { min-width: 64px; width: 64px; }
 }

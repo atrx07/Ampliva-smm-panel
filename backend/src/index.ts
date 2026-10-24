@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { listDbServices, normalizeServices, previewServices, retailFor, rowToPublic, syncCatalogToDb } from './catalog';
+import { listDbServices, normalizeServiceType, normalizeServices, previewServices, retailFor, rowToPublic, syncCatalogToDb } from './catalog';
 import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
@@ -344,22 +344,92 @@ app.post('/api/orders', async (c) => {
   const client = cidClientFromEnv(c.env);
   if (!client) return c.json({ error: 'Ordering is not enabled yet (provider not configured).' }, 503);
 
-  const body: { serviceId?: string; link?: string; quantity?: number } = await c.req.json<{ serviceId?: string; link?: string; quantity?: number }>().catch(() => ({}));
+  const body: {
+    serviceId?: string; link?: string; quantity?: number;
+    comments?: string; usernames?: string; groups?: string; hashtag?: string;
+    username?: string; answerNumber?: number | string; keywords?: string;
+    runs?: number | string; interval?: number | string;
+  } = await c.req.json().catch(() => ({}));
   const serviceId = String(body.serviceId || '');
   const link = String(body.link || '').trim();
-  const quantity = Math.floor(Number(body.quantity));
 
   const service = await db.prepare('SELECT * FROM services WHERE id = ?').bind(serviceId).first<ServiceRow>();
   if (!service || service.is_active !== 1 || service.provider_active !== 1) {
     return c.json({ error: 'This service is not available right now.' }, 404);
   }
-  if (!link || link.length < 4) return c.json({ error: 'Enter the link to promote.' }, 400);
-  if (!Number.isFinite(quantity) || quantity < service.min || quantity > service.max) {
-    return c.json({ error: `Quantity must be between ${service.min} and ${service.max} for this service.` }, 400);
+  // The link field carries a username for username-only services, so only
+  // emptiness is rejected here — the provider validates the format.
+  if (!link) return c.json({ error: 'Enter the link (or username) to promote.' }, 400);
+
+  // Type-specific inputs (audit 2026-10-25). The frontend renders these
+  // fields per service type, but the backend re-validates everything —
+  // a crafted request must never reach CID with missing parameters.
+  const kind = normalizeServiceType(service.type);
+  const nonEmptyLines = (value: unknown): string[] =>
+    String(value ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const extras: Record<string, string> = {};
+  let quantity = Math.floor(Number(body.quantity));
+  const derived = kind === 'customComments' || kind === 'mentionsCustomList';
+  if (kind === 'customComments') {
+    const lines = nonEmptyLines(body.comments);
+    if (!lines.length) return c.json({ error: 'Add at least one comment (one per line).' }, 400);
+    quantity = lines.length; // API rule: quantity = number of lines.
+    extras.comments = lines.join('\n');
+  } else if (kind === 'mentionsCustomList') {
+    const lines = nonEmptyLines(body.usernames);
+    if (!lines.length) return c.json({ error: 'Add at least one username (one per line).' }, 400);
+    quantity = lines.length;
+    extras.usernames = lines.join('\n');
+  } else if (kind === 'mentionsHashtag') {
+    const tag = String(body.hashtag ?? '').trim();
+    if (!tag) return c.json({ error: 'Add the hashtag.' }, 400);
+    extras.hashtag = tag;
+  } else if (kind === 'mentionsUserFollowers') {
+    const donor = String(body.username ?? '').trim();
+    if (!donor) return c.json({ error: 'Add the donor username.' }, 400);
+    extras.username = donor;
+  } else if (kind === 'poll') {
+    const answer = Math.floor(Number(body.answerNumber));
+    if (!Number.isFinite(answer) || answer < 1) return c.json({ error: 'Choose a poll answer number.' }, 400);
+    extras.answer_number = String(answer);
+  } else if (kind === 'invites') {
+    const lines = nonEmptyLines(body.groups);
+    if (!lines.length) return c.json({ error: 'Add at least one group (one per line).' }, 400);
+    extras.groups = lines.join('\n');
+  } else if (kind === 'seo') {
+    const keywords = String(body.keywords ?? '').trim();
+    if (keywords) extras.keywords = keywords; // optional for this type
+  }
+  if (kind === 'package') {
+    quantity = service.min; // Package size is fixed; API charges at min.
   }
 
-  const charge = round2((service.retail_rate * quantity) / 1000);
-  const providerCost = round2((service.provider_rate * quantity) / 1000);
+  // Dripfeed (only when the provider flags the service): total volume =
+  // quantity × runs, so the charge scales with runs too.
+  let runs = 1;
+  if (service.dripfeed === 1) {
+    const rawRuns = body.runs === undefined || body.runs === null || body.runs === '' ? undefined : Math.floor(Number(body.runs));
+    const rawInterval = body.interval === undefined || body.interval === null || body.interval === '' ? undefined : Math.floor(Number(body.interval));
+    if (rawRuns !== undefined) {
+      if (!Number.isFinite(rawRuns) || rawRuns < 1) return c.json({ error: 'Runs must be at least 1.' }, 400);
+      runs = rawRuns;
+      extras.runs = String(rawRuns);
+    }
+    if (rawInterval !== undefined) {
+      if (!Number.isFinite(rawInterval) || rawInterval < 1) return c.json({ error: 'Interval must be at least 1 minute.' }, 400);
+      extras.interval = String(rawInterval);
+    }
+  }
+
+  if (!Number.isFinite(quantity) || quantity < service.min || quantity > service.max) {
+    const message = derived
+      ? `Add between ${service.min} and ${service.max} lines.`
+      : `Quantity must be between ${service.min} and ${service.max} for this service.`;
+    return c.json({ error: message }, 400);
+  }
+
+  const charge = round2((service.retail_rate * quantity * runs) / 1000);
+  const providerCost = round2((service.provider_rate * quantity * runs) / 1000);
   const balance = await getBalance(db, user.id);
   if (balance < charge) {
     return c.json({ error: `Insufficient balance. This order costs ₹${charge.toFixed(2)} and your balance is ₹${balance.toFixed(2)}. Top up first.` }, 402);
@@ -368,7 +438,7 @@ app.post('/api/orders', async (c) => {
   // Provider first: if CID rejects, the customer is never debited.
   let providerOrderId: string;
   try {
-    providerOrderId = await client.addOrder(service.provider_id, link, quantity);
+    providerOrderId = await client.addOrder(service.provider_id, link, quantity, extras);
   } catch (error) {
     return c.json({ error: `Provider rejected the order: ${error instanceof Error ? error.message : 'unknown error'}` }, 502);
   }

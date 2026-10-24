@@ -41,6 +41,7 @@ function ServiceRow({ service, currency, user, open, onToggle, onOrderClick }: {
         <div className="service-row-body">
           <h3>{service.name}</h3>
           <p className="category">{displayCategory(service.category)}</p>
+          {service.description && <p className="service-description">{service.description}</p>}
           {service.refill && <span className="refill-chip">Refill</span>}
           <div className="limits">
             <span><small>Minimum</small>{formatNumber(service.min)}</span>

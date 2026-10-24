@@ -11,6 +11,11 @@ export interface Service {
   refill: boolean;
   cancel: boolean;
   description?: string;
+  /** Provider service type ('Default', 'Custom Comments', ...). Absent
+   *  until the catalogue syncs after migration 0003 — treated as Default. */
+  type?: string;
+  /** Provider dripfeed flag: when true, orders may carry runs + interval. */
+  dripfeed?: boolean;
 }
 
 export interface ServicesResponse {

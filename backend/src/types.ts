@@ -30,6 +30,11 @@ export interface PublicService {
   refill: boolean;
   cancel: boolean;
   description?: string;
+  /** Provider service type (e.g. 'Default', 'Custom Comments', 'Poll').
+   *  Defaults to 'Default' for rows synced before migration 0003. */
+  type: string;
+  /** Provider dripfeed flag: when true, orders may carry runs + interval. */
+  dripfeed: boolean;
 }
 
 export interface RawCidService {
@@ -65,6 +70,9 @@ export interface ServiceRow {
   provider_active: number;
   first_seen_at: string;
   last_synced_at: string;
+  /** Migration 0003 columns; absent (undefined) on pre-migration rows. */
+  type?: string | null;
+  dripfeed?: number | null;
 }
 
 export interface UserRow {

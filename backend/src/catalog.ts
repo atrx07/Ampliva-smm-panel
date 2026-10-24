@@ -34,6 +34,55 @@ function retailRate(providerRate: number, markupPercent: number) {
   return Math.ceil(providerRate * (1 + markupPercent / 100) * 100) / 100;
 }
 
+// Provider service kinds, from the standard SMM API v2 type names
+// (Perfect Panel / JAP naming). The raw `type` string varies by panel, so
+// it is normalized (case, spaces, underscores, hyphens stripped) before
+// mapping. Unknown types fall back to 'default' — the link + quantity
+// form — so a new upstream type can never break ordering; it just shows
+// no extra fields until mapped. The frontend mirrors this map in
+// lib/orderFields.ts; keep both in sync.
+export type ServiceKind =
+  | 'default'
+  | 'package'
+  | 'customComments'
+  | 'mentionsCustomList'
+  | 'mentionsHashtag'
+  | 'mentionsUserFollowers'
+  | 'poll'
+  | 'invites'
+  | 'seo';
+
+export function normalizeServiceType(raw: string | null | undefined): ServiceKind {
+  const key = (raw ?? '').toLowerCase().replace(/[\s_\-]+/g, '');
+  switch (key) {
+    case '':
+    case 'default':
+      return 'default';
+    case 'package':
+      return 'package';
+    case 'customcomments':
+      return 'customComments';
+    case 'mentionscustomlist':
+    case 'mentions':
+      return 'mentionsCustomList';
+    case 'mentionshashtag':
+      return 'mentionsHashtag';
+    case 'mentionsuserfollowers':
+      return 'mentionsUserFollowers';
+    case 'poll':
+      return 'poll';
+    case 'invitesfromgroups':
+    case 'invites':
+      return 'invites';
+    case 'seo':
+    case 'webtraffic':
+    case 'traffic':
+      return 'seo';
+    default:
+      return 'default';
+  }
+}
+
 export function normalizeServices(raw: RawCidService[], markupPercent: number): PublicService[] {
   return raw
     .map((service) => {
@@ -49,6 +98,8 @@ export function normalizeServices(raw: RawCidService[], markupPercent: number): 
         refill: asBoolean(service.refill),
         cancel: asBoolean(service.cancel),
         description: service.description?.trim() || undefined,
+        type: service.type?.trim() || 'Default',
+        dripfeed: asBoolean(service.dripfeed),
       } satisfies PublicService;
     })
     .filter((service) => service.rate > 0 && service.max > 0)
@@ -69,6 +120,8 @@ export function rowToPublic(row: ServiceRow): PublicService {
     refill: row.refill === 1,
     cancel: row.cancel === 1,
     description: row.description ?? undefined,
+    type: row.type?.trim() || 'Default',
+    dripfeed: row.dripfeed === 1,
   };
 }
 
@@ -100,6 +153,22 @@ export async function syncCatalogToDb(
       .all<{ id: string; markup_override: number | null }>();
     const overrides = new Map((existing.results ?? []).map((r) => [r.id, r.markup_override]));
 
+    // Migration 0003 columns may not exist yet (migrations are pasted
+    // into the D1 console on the owner's schedule). Check once and build
+    // the upsert around whatever the table actually has, so a sync never
+    // fails on unknown columns — it just skips fields it cannot store
+    // until the migration lands, and picks them up on the next sync.
+    let hasType = false;
+    let hasDripfeed = false;
+    try {
+      const info = await db.prepare('PRAGMA table_info(services)').all<{ name: string }>();
+      const cols = new Set((info.results ?? []).map((r) => r.name));
+      hasType = cols.has('type');
+      hasDripfeed = cols.has('dripfeed');
+    } catch {
+      // Pre-migration database: sync the old column set.
+    }
+
     const statements: D1PreparedStatement[] = [];
     let live = 0;
     for (const service of raw) {
@@ -108,41 +177,25 @@ export async function syncCatalogToDb(
       if (providerRate <= 0 || max <= 0) continue;
       const id = `svc_${service.service}`;
       const markup = overrides.get(id) ?? defaultMarkup;
+      const cols: string[] = ['id', 'provider_id', 'provider_name', 'category', 'platform', 'provider_rate', 'retail_rate', 'min', 'max', 'refill', 'cancel', 'description', 'is_active', 'provider_active', 'first_seen_at', 'last_synced_at'];
+      const vals: unknown[] = [id, asNumber(service.service), service.name || 'Promotional service', service.category?.trim() || 'Other', detectPlatform(service), providerRate, retailRate(providerRate, markup), asNumber(service.min), max, asBoolean(service.refill) ? 1 : 0, asBoolean(service.cancel) ? 1 : 0, service.description?.trim() || null, 1, 1, now, now];
+      if (hasType) {
+        cols.push('type');
+        vals.push(service.type?.trim() || 'Default');
+      }
+      if (hasDripfeed) {
+        cols.push('dripfeed');
+        vals.push(asBoolean(service.dripfeed) ? 1 : 0);
+      }
+      // On conflict, refresh everything except admin curation
+      // (is_active) and first-seen bookkeeping.
+      const updateCols = cols.filter((c) => !['id', 'provider_id', 'is_active', 'first_seen_at'].includes(c));
       statements.push(
         db
           .prepare(
-            `INSERT INTO services (id, provider_id, provider_name, category, platform, provider_rate, retail_rate, min, max, refill, cancel, description, is_active, provider_active, first_seen_at, last_synced_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET
-               provider_name = excluded.provider_name,
-               category = excluded.category,
-               platform = excluded.platform,
-               provider_rate = excluded.provider_rate,
-               retail_rate = excluded.retail_rate,
-               min = excluded.min,
-               max = excluded.max,
-               refill = excluded.refill,
-               cancel = excluded.cancel,
-               description = excluded.description,
-               provider_active = 1,
-               last_synced_at = excluded.last_synced_at`,
+            `INSERT INTO services (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updateCols.map((c) => `${c} = excluded.${c}`).join(', ')}`,
           )
-          .bind(
-            id,
-            asNumber(service.service),
-            service.name || 'Promotional service',
-            service.category?.trim() || 'Other',
-            detectPlatform(service),
-            providerRate,
-            retailRate(providerRate, markup),
-            asNumber(service.min),
-            max,
-            asBoolean(service.refill) ? 1 : 0,
-            asBoolean(service.cancel) ? 1 : 0,
-            service.description?.trim() || null,
-            now,
-            now,
-          ),
+          .bind(...vals),
       );
       live++;
     }
@@ -198,6 +251,8 @@ export const previewServices: PublicService[] = [
     max: 100000,
     refill: true,
     cancel: false,
+    type: 'Default',
+    dripfeed: false,
   },
   {
     id: 'preview_ig_views',
@@ -209,6 +264,8 @@ export const previewServices: PublicService[] = [
     max: 1000000,
     refill: false,
     cancel: true,
+    type: 'Default',
+    dripfeed: false,
   },
   {
     id: 'preview_yt_views',
@@ -220,6 +277,8 @@ export const previewServices: PublicService[] = [
     max: 500000,
     refill: false,
     cancel: false,
+    type: 'Default',
+    dripfeed: false,
   },
   {
     id: 'preview_tt_views',
@@ -231,6 +290,8 @@ export const previewServices: PublicService[] = [
     max: 1000000,
     refill: false,
     cancel: true,
+    type: 'Default',
+    dripfeed: false,
   },
   {
     id: 'preview_fb_reactions',
@@ -242,6 +303,8 @@ export const previewServices: PublicService[] = [
     max: 50000,
     refill: false,
     cancel: false,
+    type: 'Default',
+    dripfeed: false,
   },
   {
     id: 'preview_tg_members',
@@ -253,5 +316,7 @@ export const previewServices: PublicService[] = [
     max: 100000,
     refill: true,
     cancel: false,
+    type: 'Default',
+    dripfeed: false,
   },
 ];
