@@ -13,3 +13,17 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function displayCategory(raw: string): string {
   return CATEGORY_LABELS[raw] ?? raw.replace(/\s+/g, ' ').trim();
 }
+
+// The two hand-curated shelves sit at the top of the category dropdown,
+// directly under "All categories", instead of buried alphabetically among
+// the ~70 provider categories. Absent labels (e.g. a platform filter that
+// excludes them) are skipped, never rendered empty.
+const PINNED_CATEGORIES = ['Mixed', 'Worth a peek'];
+
+export function sortCategories(names: string[]): string[] {
+  const pinned = PINNED_CATEGORIES.filter((name) => names.includes(name));
+  const rest = names
+    .filter((name) => !PINNED_CATEGORIES.includes(name))
+    .sort((a, b) => a.localeCompare(b));
+  return [...pinned, ...rest];
+}

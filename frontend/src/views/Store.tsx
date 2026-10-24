@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { displayCategory } from '../lib/categories';
+import { displayCategory, sortCategories } from '../lib/categories';
 import { FEATURED_IDS } from '../lib/featured';
 import { formatMoney, formatNumber, platformLabels } from '../lib/format';
 import type { Platform, Service, ServicesResponse } from '../types';
@@ -13,31 +13,69 @@ const SORT_LABELS: Record<SortKey, string> = {
   'min-asc': 'Minimum: low to high',
 };
 
-function ServiceCard({ service, currency, user, onOrderClick }: {
+// Best-effort type badge from the service name ("Views", "Likes", ...).
+// First keyword wins; names that match nothing fall back to "Service".
+const TYPE_KEYWORDS: Array<[string, string]> = [
+  ['subscriber', 'Subscribers'],
+  ['follower', 'Followers'],
+  ['member', 'Members'],
+  ['like', 'Likes'],
+  ['view', 'Views'],
+  ['comment', 'Comments'],
+  ['share', 'Shares'],
+  ['reaction', 'Reactions'],
+  ['impression', 'Impressions'],
+  ['reach', 'Reach'],
+  ['save', 'Saves'],
+  ['download', 'Downloads'],
+  ['vote', 'Votes'],
+  ['traffic', 'Traffic'],
+  ['boost', 'Boost'],
+  ['watch', 'Watch time'],
+];
+
+function serviceType(name: string): string {
+  const lower = name.toLowerCase();
+  for (const [keyword, label] of TYPE_KEYWORDS) {
+    if (lower.includes(keyword)) return label;
+  }
+  return 'Service';
+}
+
+// Compact accordion row: a one-line banner (platform, name, type, price)
+// that expands into the full details + buy button. The page holds a single
+// openId, so expanding one row always collapses whatever was open.
+function ServiceRow({ service, currency, user, open, onToggle, onOrderClick }: {
   service: Service;
   currency: string;
   user: boolean;
+  open: boolean;
+  onToggle: () => void;
   onOrderClick: (service: Service) => void;
 }) {
   return (
-    <article className="service-card">
-      <div className="card-topline">
+    <article className={`service-row${open ? ' open' : ''}`}>
+      <button type="button" className="service-row-head" onClick={onToggle} aria-expanded={open}>
         <span className="platform-chip">{platformLabels[service.platform]}</span>
-        {service.refill && <span className="refill-chip">Refill</span>}
-      </div>
-      <h3>{service.name}</h3>
-      <p className="category">{displayCategory(service.category)}</p>
-      <div className="price-row">
-        <strong>{formatMoney(service.rate, currency)}</strong>
-        <span>/ 1K</span>
-      </div>
-      <div className="limits">
-        <span><small>Minimum</small>{formatNumber(service.min)}</span>
-        <span><small>Maximum</small>{formatNumber(service.max)}</span>
-      </div>
-      <button className="service-button active-button" type="button" onClick={() => onOrderClick(service)}>
-        {user ? 'Order now' : 'Log in to order'}
+        <span className="row-name">{service.name}</span>
+        <span className="type-chip">{serviceType(service.name)}</span>
+        <span className="row-price"><strong>{formatMoney(service.rate, currency)}</strong><span> /1K</span></span>
+        <span className="row-chevron" aria-hidden="true">{open ? '▴' : '▾'}</span>
       </button>
+      {open && (
+        <div className="service-row-body">
+          <h3>{service.name}</h3>
+          <p className="category">{displayCategory(service.category)}</p>
+          {service.refill && <span className="refill-chip">Refill</span>}
+          <div className="limits">
+            <span><small>Minimum</small>{formatNumber(service.min)}</span>
+            <span><small>Maximum</small>{formatNumber(service.max)}</span>
+          </div>
+          <button className="service-button active-button" type="button" onClick={() => onOrderClick(service)}>
+            {user ? 'Order now' : 'Log in to order'}
+          </button>
+        </div>
+      )}
     </article>
   );
 }
@@ -54,6 +92,7 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
   const [platform, setPlatform] = useState<Platform | 'all'>('all');
   const [category, setCategory] = useState('all');
   const [sort, setSort] = useState<SortKey>('featured');
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const services = catalog?.services ?? [];
 
@@ -69,7 +108,7 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
     for (const service of services) {
       if (platform === 'all' || service.platform === platform) names.add(displayCategory(service.category));
     }
-    return [...names].sort((a, b) => a.localeCompare(b));
+    return sortCategories([...names]);
   }, [services, platform]);
 
   const featured = useMemo(() => {
@@ -101,6 +140,16 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
   function pickPlatform(item: Platform | 'all') {
     setPlatform(item);
     setCategory('all');
+    setOpenId(null);
+  }
+
+  function pickCategory(name: string) {
+    setCategory(name);
+    setOpenId(null);
+  }
+
+  function toggleRow(id: string) {
+    setOpenId((current) => (current === id ? null : id));
   }
 
   return (
@@ -144,7 +193,7 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
           <div className="store-toolbar">
             <label className="select-field">
               <span>Category</span>
-              <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter by category">
+              <select value={category} onChange={(event) => pickCategory(event.target.value)} aria-label="Filter by category">
                 <option value="all">All categories</option>
                 {categories.map((name) => (
                   <option key={name} value={name}>{name}</option>
@@ -167,8 +216,8 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
         {error && <div className="notice error">{error}. Start the Worker locally or set VITE_API_URL.</div>}
 
         {loading ? (
-          <div className="service-grid" aria-label="Loading services">
-            {Array.from({ length: 6 }).map((_, index) => <div className="service-card skeleton" key={index} />)}
+          <div className="service-list" aria-label="Loading services">
+            {Array.from({ length: 6 }).map((_, index) => <div className="service-row skeleton" key={index} />)}
           </div>
         ) : (
           <>
@@ -176,16 +225,16 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
               <section className="featured-section" aria-label="Featured services">
                 <h3>⭐ Featured</h3>
                 <p className="modal-sub">The services most customers start with — clear names, sane minimums, refill where it matters.</p>
-                <div className="service-grid">
+                <div className="service-list">
                   {featured.map((service) => (
-                    <ServiceCard key={service.id} service={service} currency={currency} user={user} onOrderClick={onOrderClick} />
+                    <ServiceRow key={service.id} service={service} currency={currency} user={user} open={openId === service.id} onToggle={() => toggleRow(service.id)} onOrderClick={onOrderClick} />
                   ))}
                 </div>
               </section>
             )}
-            <div className="service-grid">
+            <div className="service-list">
               {visibleServices.map((service: Service) => (
-                <ServiceCard key={service.id} service={service} currency={currency} user={user} onOrderClick={onOrderClick} />
+                <ServiceRow key={service.id} service={service} currency={currency} user={user} open={openId === service.id} onToggle={() => toggleRow(service.id)} onOrderClick={onOrderClick} />
               ))}
               {!visibleServices.length && !error && (
                 <div className="empty-state">No services match that search yet.</div>

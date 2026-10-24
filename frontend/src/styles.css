@@ -66,14 +66,22 @@ nav a:hover { color: white; }
 .platform-tabs button.active { background: #ede9ff; color: #11131a; border-color: #ede9ff; }
 .notice { margin: 0 0 18px; border: 1px solid rgba(185, 165, 255, .22); background: rgba(145, 119, 255, .08); color: #c9c0ef; border-radius: 12px; padding: 12px 14px; font-size: .88rem; }
 .notice.error { border-color: rgba(255, 127, 127, .22); background: rgba(255, 100, 100, .07); color: #efb2b2; }
-.service-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.service-card { min-height: 300px; padding: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 17px; display: flex; flex-direction: column; transition: transform .18s ease, border-color .18s ease, background .18s ease; }
-.service-card:not(.skeleton):hover { transform: translateY(-2px); border-color: rgba(181, 168, 255, .26); background: var(--panel-strong); }
-.card-topline { min-height: 27px; display: flex; justify-content: space-between; gap: 8px; }
+.service-list { display: grid; gap: 10px; }
+.service-row { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0; transition: border-color .18s ease, background .18s ease; }
+.service-row.open { border-color: rgba(181, 168, 255, .35); background: var(--panel-strong); }
+.service-row-head { width: 100%; display: flex; align-items: center; gap: 10px; background: transparent; border: 0; color: inherit; padding: 13px 14px; cursor: pointer; text-align: left; min-width: 0; }
+.row-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .92rem; }
+.type-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; font-size: .68rem; font-weight: 700; color: #9da3b2; background: rgba(255,255,255,.05); white-space: nowrap; }
+.row-price { white-space: nowrap; font-size: .92rem; }
+.row-price span { color: #7e8492; font-size: .72rem; }
+.row-chevron { color: #7e8492; font-size: .8rem; }
+.service-row-body { border-top: 1px solid var(--line); padding: 16px; display: grid; gap: 12px; }
+.service-row-body h3 { margin: 0; font-size: 1rem; line-height: 1.42; letter-spacing: -0.02em; min-width: 0; overflow-wrap: break-word; }
+.service-row-body .service-button { margin-top: 0; }
+.service-row.skeleton { min-height: 48px; }
 .platform-chip, .refill-chip { display: inline-flex; width: fit-content; align-items: center; border-radius: 999px; padding: 5px 9px; font-size: .7rem; font-weight: 720; }
 .platform-chip { background: rgba(181, 168, 255, .10); color: #bfb3f7; }
 .refill-chip { background: rgba(93, 207, 145, .09); color: #83dbab; }
-.service-card h3 { margin: 18px 0 7px; font-size: 1.02rem; line-height: 1.42; letter-spacing: -0.025em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .category { margin: 0; color: #797f8e; font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .price-row { margin-top: auto; padding-top: 22px; display: flex; align-items: baseline; gap: 5px; }
 .price-row strong { font-size: 1.55rem; letter-spacing: -.045em; }
@@ -82,7 +90,7 @@ nav a:hover { color: white; }
 .limits span { color: #d7d9df; font-size: .83rem; }
 .limits small { display: block; color: #6f7584; font-size: .67rem; margin-bottom: 3px; }
 .service-button { margin-top: 17px; width: 100%; border: 1px solid var(--line); color: #777d8b; background: rgba(255,255,255,.03); border-radius: 11px; padding: 10px 12px; }
-.skeleton { min-height: 300px; background: linear-gradient(100deg, rgba(255,255,255,.025) 30%, rgba(255,255,255,.06) 50%, rgba(255,255,255,.025) 70%); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
+.skeleton { min-height: 48px; background: linear-gradient(100deg, rgba(255,255,255,.025) 30%, rgba(255,255,255,.06) 50%, rgba(255,255,255,.025) 70%); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
 @keyframes shimmer { to { background-position-x: -200%; } }
 .empty-state { grid-column: 1 / -1; padding: 60px 20px; text-align: center; color: #777e8d; border: 1px dashed var(--line); border-radius: 16px; }
 
@@ -97,7 +105,7 @@ footer p { color: #666d7b; max-width: 600px; text-align: right; line-height: 1.5
 @media (max-width: 850px) {
   nav a { display: none; }
   .hero { padding-top: 82px; }
-  .hero-grid, .service-grid, .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero-grid, .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .section-heading { align-items: start; flex-direction: column; }
 }
 
@@ -112,7 +120,7 @@ footer p { color: #666d7b; max-width: 600px; text-align: right; line-height: 1.5
   .brand-mark { width: 26px; height: 26px; border-radius: 8px; }
   .hero { padding: 72px 0 60px; }
   .hero h1 { font-size: clamp(3rem, 16vw, 4.7rem); }
-  .hero-grid, .service-grid, .steps { grid-template-columns: minmax(0, 1fr); }
+  .hero-grid, .steps { grid-template-columns: minmax(0, 1fr); }
   .catalog-section, .how-section { padding: 65px 0; }
   footer { align-items: flex-start; flex-direction: column; }
   footer p { text-align: left; }
@@ -207,20 +215,18 @@ td { padding: 10px 8px 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); v
    may shrink, and overflow-x is clipped as a final safety net. */
 html { -webkit-text-size-adjust: 100%; }
 body { overflow-x: clip; }
-.service-card { min-width: 0; }
-.service-card h3 { min-width: 0; overflow-wrap: break-word; }
+.service-row, .service-row-body h3 { min-width: 0; }
 .platform-tabs { scrollbar-width: none; }
 .platform-tabs::-webkit-scrollbar { display: none; }
 .modal { max-height: 90dvh; }
 @media (max-width: 580px) {
-  /* Service cards: compact — 316 services shouldn't mean one card per screen */
-  .service-card { min-height: 0; padding: 16px; border-radius: 15px; }
-  .service-card h3 { margin: 12px 0 5px; font-size: .98rem; }
-  .card-topline { min-height: 24px; }
-  .price-row { padding-top: 14px; }
-  .price-row strong { font-size: 1.32rem; }
-  .limits { margin-top: 10px; }
-  .service-button { margin-top: 13px; padding: 12px; font-size: .92rem; }
+  /* Service rows: keep the banner tight on phones */
+  .service-row-head { padding: 12px; gap: 8px; }
+  .row-name { font-size: .85rem; }
+  .type-chip { font-size: .62rem; padding: 3px 7px; }
+  .row-price { font-size: .85rem; }
+  .service-row-body { padding: 14px; }
+  .service-button { padding: 12px; font-size: .92rem; }
   .platform-tabs button { padding: 10px 14px; }
   /* Steps: drop the desktop dead space */
   .steps article { min-height: 0; padding: 18px; }
