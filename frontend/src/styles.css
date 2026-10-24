@@ -306,3 +306,11 @@ body { overflow-x: clip; }
 .profile-rows > div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .profile-rows > div:first-child { padding-top: 0; }
 .profile-rows > div:last-child { border-bottom: 0; padding-bottom: 0; }
+
+/* Refill buttons (order history) + cooldown bubble */
+.row-actions .refill-btn { background: #2e9e5b; border-color: #2e9e5b; color: #fff; font-weight: 700; }
+.row-actions .refill-btn:hover { border-color: #3fbf72; }
+.row-actions .refill-btn.cooldown { background: #c0453e; border-color: #c0453e; color: #fff; display: inline-flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.25; padding: 5px 12px; }
+.row-actions .refill-btn.cooldown .refill-label { text-decoration: line-through; }
+.row-actions .refill-btn.cooldown .refill-foot { font-size: .62rem; color: #b9bec9; font-weight: 400; }
+.cooldown-bubble { position: fixed; z-index: 80; background: #1a1e2e; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: .82rem; color: #e8e6ef; box-shadow: 0 8px 24px rgba(0,0,0,.45); max-width: 220px; pointer-events: none; }

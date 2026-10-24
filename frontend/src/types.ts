@@ -71,6 +71,8 @@ export interface Order {
   user_id: string;
   user_email?: string;
   service_id: string;
+  /** Service's refill flag (joined in GET /api/orders): 1 = refills allowed. */
+  service_refill?: number | null;
   service_name: string;
   provider_order_id: string | null;
   link: string;

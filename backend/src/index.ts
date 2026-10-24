@@ -468,8 +468,11 @@ app.post('/api/orders', async (c) => {
 app.get('/api/orders', async (c) => {
   const user = await requireAuth(c);
   if (isResponse(user)) return user;
+  // Join the service's refill flag so the frontend can hide the Refill
+  // button for services that don't allow refills (tapping it used to
+  // create Failed rows in the refill log).
   const rows = await c.env.DB!
-    .prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 100')
+    .prepare('SELECT o.*, s.refill AS service_refill FROM orders o LEFT JOIN services s ON s.id = o.service_id WHERE o.user_id = ? ORDER BY o.created_at DESC LIMIT 100')
     .bind(user.id)
     .all<OrderRow>();
   return c.json({ orders: rows.results ?? [] });
@@ -513,6 +516,14 @@ app.post('/api/orders/:id/refill', async (c) => {
     .bind(c.req.param('id'), user.id)
     .first<OrderRow>();
   if (!order?.provider_order_id) return c.json({ error: 'Order not found' }, 404);
+  // Refuse before recording anything: services that don't allow refills
+  // must never produce Failed rows in the refill log.
+  const service = await c.env.DB!.prepare('SELECT refill FROM services WHERE id = ?')
+    .bind(order.service_id)
+    .first<{ refill: number }>();
+  if (!service || service.refill !== 1) {
+    return c.json({ error: 'This service does not allow refills.' }, 400);
+  }
   // Record the attempt so refill history exists even for failures.
   // Tolerant: if migration 0004 hasn't been pasted yet, the writes fail
   // silently and the refill still proceeds exactly as before.
