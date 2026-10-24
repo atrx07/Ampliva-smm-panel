@@ -242,3 +242,7 @@ body { overflow-x: clip; }
   .upi-pay-side strong { font-size: .95rem; text-align: center; }
   .upi-pay-side .muted { text-align: center; }
 }
+
+/* Instant (Razorpay) top-up box — sits above the manual UPI flow */
+.instant-pay-box { border: 1px solid rgba(47, 191, 113, .45); background: rgba(47, 191, 113, .08); border-radius: 12px; padding: 14px; margin: 12px 0; }
+.instant-pay-box p { margin: 6px 0 12px; }

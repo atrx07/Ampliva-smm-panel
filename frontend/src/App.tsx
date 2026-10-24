@@ -11,6 +11,7 @@ import {
   adminUpdateService,
   cancelOrder,
   createOrder,
+  createRazorpayOrder,
   createTopup,
   getConfig,
   getMe,
@@ -432,6 +433,7 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
   const amount = Math.max(0, Math.floor(Number(amountText) || 0));
   const [txnRef, setTxnRef] = useState('');
   const [topupMsg, setTopupMsg] = useState<string | null>(null);
+  const [razorpayBusy, setRazorpayBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -476,6 +478,56 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
     }
   }
 
+  // Razorpay Checkout is loaded on demand (never bundled, never on page load).
+  async function payInstant() {
+    if (amount < 10) {
+      setTopupMsg('Top-up amount must be at least ₹10.');
+      return;
+    }
+    setTopupMsg(null);
+    setRazorpayBusy(true);
+    try {
+      const order = await createRazorpayOrder(amount);
+      if (!(window as unknown as { Razorpay?: unknown }).Razorpay) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Could not load the payment form. Check your connection and try again.'));
+          document.body.appendChild(script);
+        });
+      }
+      const RazorpayCtor = (window as unknown as { Razorpay: new (options: Record<string, unknown>) => {
+        open: () => void;
+        on: (event: string, handler: (response: { error?: { description?: string } }) => void) => void;
+      } }).Razorpay;
+      const rzp = new RazorpayCtor({
+        key: order.keyId,
+        order_id: order.orderId,
+        amount: Math.round(order.amount * 100),
+        currency: 'INR',
+        name: 'Ampliva',
+        description: `Wallet top-up ${formatMoney(order.amount, currency)}`,
+        // The webhook credits the wallet; the handler only reports + refreshes.
+        handler: () => {
+          setTopupMsg('Payment received — your balance updates in a few seconds.');
+          window.setTimeout(load, 2000);
+          window.setTimeout(load, 7000);
+        },
+        modal: { ondismiss: () => setRazorpayBusy(false) },
+      });
+      rzp.on('payment.failed', (response) => {
+        setTopupMsg(response.error?.description || 'Payment failed. Your wallet was not charged.');
+        setRazorpayBusy(false);
+      });
+      rzp.open();
+      setRazorpayBusy(false);
+    } catch (err) {
+      setTopupMsg(err instanceof Error ? err.message : 'Could not start the payment');
+      setRazorpayBusy(false);
+    }
+  }
+
   async function actOnOrder(id: string, action: 'refresh' | 'refill' | 'cancel') {
     setBusyId(id);
     try {
@@ -505,6 +557,18 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
         <article className="panel">
           <h3>Wallet balance</h3>
           <div className="big-balance">{wallet ? formatMoney(wallet.balance, currency) : '…'}</div>
+          {(config?.manualTopupsEnabled || config?.razorpayEnabled) && (
+            <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
+          )}
+          {config?.razorpayEnabled && (
+            <div className="instant-pay-box">
+              <strong>⚡ Instant top-up</strong>
+              <p className="modal-sub">Pay by card, UPI or netbanking — your balance credits automatically, no waiting for verification.</p>
+              <button className="primary-button full" type="button" onClick={payInstant} disabled={razorpayBusy || amount < 10}>
+                {razorpayBusy ? 'Starting payment…' : `Pay ${amount >= 10 ? formatMoney(amount, currency) : ''} instantly`}
+              </button>
+            </div>
+          )}
           {config?.manualTopupsEnabled ? (
             <>
               <ol className="steps-list">
@@ -519,19 +583,18 @@ function Dashboard({ currency, config, onBalanceChange, onBrowse }: {
                   <strong>{config.upiId}</strong>
                   <button type="button" className="ghost-button" onClick={copyUpiId}>{copied ? 'Copied ✓' : 'Copy UPI ID'}</button>
                   <a className="primary-button" href={upiLink}>Pay {amount >= 10 ? formatMoney(amount, currency) : ''} with UPI app</a>
-                  <span className="muted">The QR and button follow the amount you enter below.</span>
+                  <span className="muted">The QR and button follow the amount above.</span>
                 </div>
               </div>
               <form onSubmit={submitTopup} className="form-stack">
-                <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
                 <label>UPI transaction reference (UTR)<input required value={txnRef} onChange={(e) => setTxnRef(e.target.value)} placeholder="e.g. 4321xxxxxxxx" /></label>
                 <button className="primary-button full" type="submit">Request top-up</button>
               </form>
-              {topupMsg && <div className="notice">{topupMsg}</div>}
             </>
           ) : (
-            <p className="modal-sub">Top-ups open as soon as the payment UPI ID is configured.</p>
+            !config?.razorpayEnabled && <p className="modal-sub">Top-ups open as soon as a payment method is configured.</p>
           )}
+          {topupMsg && <div className="notice">{topupMsg}</div>}
           {!!wallet?.topups.length && (
             <div className="mini-list">
               <h4>Your top-up requests</h4>

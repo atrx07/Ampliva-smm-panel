@@ -33,3 +33,7 @@ required = ["CID_API_KEY"]
 # Optional (dashboard-only, never in git): ADMIN_DISCORD_WEBHOOK — a Discord
 # webhook URL. When set, new top-up requests ping the owner instantly and the
 # daily cron re-pings about requests left pending over 4 hours.
+# Optional (dashboard-only, never in git): RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET,
+# RAZORPAY_WEBHOOK_SECRET — instant card/UPI/netbanking top-ups. The feature
+# stays off until all three are set, so deploys never gate on them. Deliberately
+# NOT in `required`: the panel must keep deploying while Razorpay is unconfigured.

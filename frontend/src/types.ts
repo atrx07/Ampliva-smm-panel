@@ -25,6 +25,7 @@ export interface PublicConfig {
   currency: string;
   upiId: string | null;
   manualTopupsEnabled: boolean;
+  razorpayEnabled: boolean;
   orderingEnabled: boolean;
 }
 

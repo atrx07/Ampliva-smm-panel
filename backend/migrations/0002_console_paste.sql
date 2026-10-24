@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS gateway_orders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), amount REAL NOT NULL, provider TEXT NOT NULL DEFAULT 'razorpay', provider_order_id TEXT NOT NULL UNIQUE, provider_payment_id TEXT, status TEXT NOT NULL DEFAULT 'created', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_gateway_orders_user ON gateway_orders (user_id, created_at);

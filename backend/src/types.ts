@@ -10,6 +10,10 @@ export interface Env {
   PUBLIC_UPI_ID?: string;
   /** Optional Discord webhook URL for owner notifications (secret; dashboard-only). */
   ADMIN_DISCORD_WEBHOOK?: string;
+  /** Razorpay gateway (all three dashboard Secrets; feature stays off until set). */
+  RAZORPAY_KEY_ID?: string;
+  RAZORPAY_KEY_SECRET?: string;
+  RAZORPAY_WEBHOOK_SECRET?: string;
   SESSION_TTL_DAYS?: string;
 }
 

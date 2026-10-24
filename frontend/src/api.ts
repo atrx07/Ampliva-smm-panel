@@ -68,6 +68,10 @@ export function createTopup(amount: number, txnRef: string): Promise<{ id: strin
   return api('/api/wallet/topups', { method: 'POST', body: JSON.stringify({ amount, txnRef }) });
 }
 
+export function createRazorpayOrder(amount: number): Promise<{ keyId: string; orderId: string; amount: number; currency: string }> {
+  return api('/api/payments/razorpay/order', { method: 'POST', body: JSON.stringify({ amount }) });
+}
+
 export function createOrder(serviceId: string, link: string, quantity: number): Promise<{ orderId: string; charge: number; balance: number; status: string }> {
   return api('/api/orders', { method: 'POST', body: JSON.stringify({ serviceId, link, quantity }) });
 }

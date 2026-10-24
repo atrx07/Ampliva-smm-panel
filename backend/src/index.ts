@@ -5,6 +5,7 @@ import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord } from './notify';
+import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
 import type { Env, OrderRow, ServiceRow, UserRow } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -42,6 +43,7 @@ app.get('/api/config', (c) => {
     currency: c.env.CID_CURRENCY || 'INR',
     upiId: c.env.PUBLIC_UPI_ID || null,
     manualTopupsEnabled: Boolean(c.env.PUBLIC_UPI_ID),
+    razorpayEnabled: razorpayConfigured(c.env),
     orderingEnabled: Boolean(c.env.CID_API_KEY && c.env.DB),
   });
 });
@@ -204,6 +206,94 @@ app.post('/api/wallet/topups', async (c) => {
     ),
   );
   return c.json({ id, status: 'pending' }, 201);
+});
+
+// ---------- Razorpay instant top-ups ----------
+// Order creation is authenticated (a gateway order is always tied to a user);
+// the webhook is the only thing that credits, and only after HMAC verification.
+
+app.post('/api/payments/razorpay/order', async (c) => {
+  const user = await requireAuth(c);
+  if (isResponse(user)) return user;
+  if (!razorpayConfigured(c.env)) return c.json({ error: 'Instant payments are not enabled yet.' }, 503);
+  const body: { amount?: number } = await c.req.json<{ amount?: number }>().catch(() => ({}));
+  const amount = Number(body.amount);
+  if (!Number.isFinite(amount) || amount < 10 || amount > 100000) {
+    return c.json({ error: 'Top-up amount must be between ₹10 and ₹1,00,000.' }, 400);
+  }
+  const id = newId('gw');
+  const now = new Date().toISOString();
+  try {
+    const order = await createRazorpayOrder(c.env, id, round2(amount));
+    await c.env.DB!
+      .prepare(
+        `INSERT INTO gateway_orders (id, user_id, amount, provider, provider_order_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'razorpay', ?, 'created', ?, ?)`,
+      )
+      .bind(id, user.id, round2(amount), order.id, now, now)
+      .run();
+    return c.json({ keyId: c.env.RAZORPAY_KEY_ID, orderId: order.id, amount: round2(amount), currency: 'INR' }, 201);
+  } catch (error) {
+    console.error('Razorpay order failed:', error instanceof Error ? error.message : 'unknown');
+    return c.json({ error: 'Could not start the payment. Try again in a moment.' }, 502);
+  }
+});
+
+app.post('/api/payments/razorpay/webhook', async (c) => {
+  const db = c.env.DB;
+  if (!db || !c.env.RAZORPAY_WEBHOOK_SECRET) return c.json({ error: 'Webhook not configured' }, 503);
+  const signature = c.req.header('x-razorpay-signature') || '';
+  const rawBody = await c.req.text();
+  const valid = await verifyRazorpaySignature(c.env.RAZORPAY_WEBHOOK_SECRET, rawBody, signature).catch(() => false);
+  if (!valid) return c.json({ error: 'Invalid signature' }, 401);
+
+  const event = JSON.parse(rawBody) as {
+    event?: string;
+    payload?: { payment?: { entity?: { id?: string; order_id?: string; amount?: number; currency?: string } } };
+  };
+  // Only a captured payment credits. Failures, refunds and other events are ignored.
+  if (event.event !== 'payment.captured') return c.json({ ok: true, ignored: event.event ?? 'unknown' });
+  const payment = event.payload?.payment?.entity;
+  if (!payment?.order_id || !payment.id) return c.json({ error: 'Malformed payment payload' }, 400);
+
+  const order = await db
+    .prepare('SELECT * FROM gateway_orders WHERE provider_order_id = ?')
+    .bind(payment.order_id)
+    .first<{ id: string; user_id: string; amount: number; status: string }>();
+  if (!order) return c.json({ error: 'Unknown gateway order' }, 404);
+  // Amount must match the order exactly (paise vs rupees) — a tampered event never credits.
+  if (payment.amount !== Math.round(order.amount * 100) || payment.currency !== 'INR') {
+    return c.json({ error: 'Payment amount mismatch' }, 400);
+  }
+  // Atomic flip: only the first delivery moves created -> paid, so retries
+  // and duplicate webhooks can never double-credit.
+  const claimed = await db
+    .prepare("UPDATE gateway_orders SET status = 'paid', provider_payment_id = ?, updated_at = ? WHERE provider_order_id = ? AND status = 'created'")
+    .bind(payment.id, new Date().toISOString(), payment.order_id)
+    .run();
+  if (claimed.meta.changes === 0) return c.json({ ok: true, already: true });
+
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO payment_requests (id, user_id, amount, method, txn_ref, status, created_at, decided_at, decided_by)
+       VALUES (?, ?, ?, 'razorpay', ?, 'approved', ?, ?, 'razorpay-webhook')`,
+    )
+    .bind(newId('top'), order.user_id, order.amount, payment.id, now, now)
+    .run();
+  const balance = await appendLedger(db, {
+    userId: order.user_id, type: 'topup', amount: order.amount,
+    refType: 'gateway_order', refId: order.id, note: `Razorpay payment ${payment.id}`,
+  });
+  const userRow = await db.prepare('SELECT email FROM users WHERE id = ?').bind(order.user_id).first<{ email: string }>();
+  c.executionCtx.waitUntil(
+    notifyDiscord(
+      c.env,
+      '⚡ Instant top-up credited',
+      `₹${order.amount.toFixed(2)} to ${userRow?.email ?? 'a customer'} via Razorpay (new balance ₹${balance.toFixed(2)})`,
+    ),
+  );
+  return c.json({ ok: true, credited: order.amount });
 });
 
 // ---------- orders ----------
