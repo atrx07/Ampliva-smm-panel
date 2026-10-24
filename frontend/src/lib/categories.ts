@@ -6,7 +6,7 @@
 // The raw names are untouched in the database and in the admin panel.
 const CATEGORY_LABELS: Record<string, string> = {
   Cidstore: 'Mixed',
-  '🚀Market crash service🤯': 'Mixed',
+  '🚀Market crash service🤯': 'Worth a peek',
   'Instgram Post/Reel share': 'Instagram Shares',
 };
 
