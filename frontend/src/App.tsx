@@ -15,8 +15,24 @@ import { useRoute } from './lib/router';
 import { Admin } from './views/Admin';
 import { Dashboard } from './views/Dashboard';
 import { Landing } from './views/Landing';
+import { Orders } from './views/Orders';
+import { Profile } from './views/Profile';
+import { Refills } from './views/Refills';
 import { Store } from './views/Store';
+import { Wallet } from './views/Wallet';
 import type { AuthUser, PublicConfig, Service, ServicesResponse } from './types';
+
+function LoginPrompt({ title, text, onLogin }: { title: string; text: string; onLogin: () => void }) {
+  return (
+    <main className="dash">
+      <article className="panel">
+        <h3>{title}</h3>
+        <p className="modal-sub">{text}</p>
+        <button className="primary-button" type="button" onClick={onLogin}>Log in / Sign up</button>
+      </article>
+    </main>
+  );
+}
 
 function App() {
   const [catalog, setCatalog] = useState<ServicesResponse | null>(null);
@@ -29,9 +45,6 @@ function App() {
   const [route, navigate] = useRoute();
   const [authOpen, setAuthOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Dashboard panel the menu should scroll to after navigating ('profile',
-  // 'wallet', 'orders', or null for the top of the page).
-  const [dashSection, setDashSection] = useState<string | null>(null);
   const [orderService, setOrderService] = useState<Service | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -84,10 +97,9 @@ function App() {
     window.setTimeout(() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' }), 60);
   }
 
-  // Menu navigation: close the drawer, remember the dashboard panel to
-  // scroll to (if any), then navigate.
-  function goMenu(path: string, section: string | null = null) {
-    setDashSection(section);
+  // Menu navigation: close the drawer, then navigate. Each menu entry is
+  // a real page now, so no section scrolling is needed.
+  function goMenu(path: string) {
     setMenuOpen(false);
     navigate(path);
   }
@@ -118,7 +130,6 @@ function App() {
         balance={balance}
         currency={currency}
         route={route}
-        section={dashSection}
         go={goMenu}
         goHow={() => goHow()}
         onLogin={() => { setMenuOpen(false); setAuthOpen(true); }}
@@ -147,22 +158,33 @@ function App() {
       )}
 
       {route === '/dashboard' && (user ? (
-        <Dashboard
-          currency={currency}
-          config={config}
-          onBalanceChange={setBalance}
-          onBrowse={() => navigate('/store')}
-          user={user}
-          section={dashSection}
-        />
+        <Dashboard currency={currency} onGo={(path) => navigate(path)} />
       ) : (
-        <main className="dash">
-          <article className="panel">
-            <h3>Log in to see your dashboard</h3>
-            <p className="modal-sub">Your wallet, top-ups and orders live here.</p>
-            <button className="primary-button" type="button" onClick={() => setAuthOpen(true)}>Log in / Sign up</button>
-          </article>
-        </main>
+        <LoginPrompt title="Log in to see your dashboard" text="Your stats and shortcuts live here." onLogin={() => setAuthOpen(true)} />
+      ))}
+
+      {route === '/profile' && (user ? (
+        <Profile currency={currency} />
+      ) : (
+        <LoginPrompt title="Log in to see your profile" text="Your account details live here." onLogin={() => setAuthOpen(true)} />
+      ))}
+
+      {route === '/wallet' && (user ? (
+        <Wallet currency={currency} config={config} onBalanceChange={setBalance} />
+      ) : (
+        <LoginPrompt title="Log in to see your wallet" text="Your balance and top-ups live here." onLogin={() => setAuthOpen(true)} />
+      ))}
+
+      {route === '/orders' && (user ? (
+        <Orders currency={currency} />
+      ) : (
+        <LoginPrompt title="Log in to see your orders" text="Your order history lives here." onLogin={() => setAuthOpen(true)} />
+      ))}
+
+      {route === '/refills' && (user ? (
+        <Refills />
+      ) : (
+        <LoginPrompt title="Log in to see your refills" text="Your refill history lives here." onLogin={() => setAuthOpen(true)} />
       ))}
 
       {route === '/admin' && (user?.role === 'admin' ? (
@@ -177,7 +199,7 @@ function App() {
         </main>
       ))}
 
-      {route !== '/' && route !== '/store' && route !== '/dashboard' && route !== '/admin' && (
+      {route !== '/' && route !== '/store' && route !== '/dashboard' && route !== '/profile' && route !== '/wallet' && route !== '/orders' && route !== '/refills' && route !== '/admin' && (
         <Landing
           serviceCount={catalog?.services.length ?? 0}
           orderingEnabled={config?.orderingEnabled ?? false}
@@ -210,7 +232,7 @@ function App() {
           onOrdered={(newBalance) => {
             setBalance(newBalance);
             setOrderService(null);
-            navigate('/dashboard');
+            navigate('/orders');
           }}
         />
       )}

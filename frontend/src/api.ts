@@ -5,6 +5,7 @@ import type {
   Order,
   PaymentRequest,
   PublicConfig,
+  RefillRequest,
   ServicesResponse,
   WalletResponse,
 } from './types';
@@ -74,6 +75,10 @@ export function createRazorpayOrder(amount: number): Promise<{ keyId: string; or
 
 export function createOrder(serviceId: string, link: string, quantity: number, extras: Record<string, string> = {}): Promise<{ orderId: string; charge: number; balance: number; status: string }> {
   return api('/api/orders', { method: 'POST', body: JSON.stringify({ serviceId, link, quantity, ...extras }) });
+}
+
+export function getRefills(): Promise<{ refills: RefillRequest[] }> {
+  return api('/api/refills');
 }
 
 export function getOrders(): Promise<{ orders: Order[] }> {

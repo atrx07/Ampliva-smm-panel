@@ -4,18 +4,17 @@ import type { AuthUser } from '../types';
 import { Icon, type IconName } from './icons';
 
 // Slide-in drawer that holds every navigation entry, so the header stays
-// a brand mark plus one menu button. Account entries navigate to the
-// dashboard and scroll to the matching section (the dashboard is one
-// page: profile, wallet and orders are panels on it).
-export function SideMenu({ open, onClose, user, balance, currency, route, section, go, goHow, onLogin, onLogout }: {
+// a brand mark plus one menu button. Every entry is a real page: the
+// dashboard is a stats hub, and Profile, Wallet, Order history and
+// Refill history are individual pages.
+export function SideMenu({ open, onClose, user, balance, currency, route, go, goHow, onLogin, onLogout }: {
   open: boolean;
   onClose: () => void;
   user: AuthUser | null;
   balance: number | null;
   currency: string;
   route: string;
-  section: string | null;
-  go: (path: string, section?: string | null) => void;
+  go: (path: string) => void;
   goHow: () => void;
   onLogin: () => void;
   onLogout: () => void;
@@ -76,11 +75,11 @@ export function SideMenu({ open, onClose, user, balance, currency, route, sectio
           {user && (
             <>
               <div className="drawer-group-label">Account</div>
-              {item('dashboard', 'Dashboard', 'dashboard', () => go('/dashboard'), route === '/dashboard' && !section)}
-              {item('profile', 'Profile', 'user', () => go('/dashboard', 'profile'), route === '/dashboard' && section === 'profile')}
-              {item('wallet', 'Wallet', 'wallet', () => go('/dashboard', 'wallet'), route === '/dashboard' && section === 'wallet')}
-              {item('orders', 'Order history', 'history', () => go('/dashboard', 'orders'), route === '/dashboard' && section === 'orders')}
-              {item('refills', 'Refill history', 'refill', () => go('/dashboard', 'orders'), route === '/dashboard' && section === 'orders')}
+              {item('dashboard', 'Dashboard', 'dashboard', () => go('/dashboard'), route === '/dashboard')}
+              {item('profile', 'Profile', 'user', () => go('/profile'), route === '/profile')}
+              {item('wallet', 'Wallet', 'wallet', () => go('/wallet'), route === '/wallet')}
+              {item('orders', 'Order history', 'history', () => go('/orders'), route === '/orders')}
+              {item('refills', 'Refill history', 'refill', () => go('/refills'), route === '/refills')}
             </>
           )}
 

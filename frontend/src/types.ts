@@ -92,6 +92,16 @@ export interface WalletResponse {
   topups: PaymentRequest[];
 }
 
+export interface RefillRequest {
+  id: string;
+  order_id: string;
+  service_name: string;
+  link: string;
+  provider_refill_id: string | null;
+  status: string;
+  created_at: string;
+}
+
 export interface AdminService extends Service {
   provider_id: number;
   provider_name: string;

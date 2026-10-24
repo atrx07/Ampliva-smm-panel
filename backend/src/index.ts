@@ -6,7 +6,7 @@ import { createSession, destroySession, hashPassword, isResponse, newId, require
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord } from './notify';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
-import type { Env, OrderRow, ServiceRow, UserRow } from './types';
+import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -486,6 +486,24 @@ app.post('/api/orders/:id/refresh', async (c) => {
   return c.json({ order: updated });
 });
 
+app.get('/api/refills', async (c) => {
+  const user = await requireAuth(c);
+  if (isResponse(user)) return user;
+  const db = c.env.DB!;
+  try {
+    const result = await db.prepare(
+      `SELECT r.id, r.order_id, o.service_name, o.link, r.provider_refill_id, r.status, r.created_at
+       FROM refill_requests r JOIN orders o ON o.id = r.order_id
+       WHERE r.user_id = ? ORDER BY r.created_at DESC`,
+    ).bind(user.id).all<RefillRequest>();
+    return c.json({ refills: result.results ?? [] });
+  } catch {
+    // Pre-migration database (0004 not pasted yet): no refill table,
+    // so the history is empty rather than an error.
+    return c.json({ refills: [] });
+  }
+});
+
 app.post('/api/orders/:id/refill', async (c) => {
   const user = await requireAuth(c);
   if (isResponse(user)) return user;
@@ -495,10 +513,26 @@ app.post('/api/orders/:id/refill', async (c) => {
     .bind(c.req.param('id'), user.id)
     .first<OrderRow>();
   if (!order?.provider_order_id) return c.json({ error: 'Order not found' }, 404);
+  // Record the attempt so refill history exists even for failures.
+  // Tolerant: if migration 0004 hasn't been pasted yet, the writes fail
+  // silently and the refill still proceeds exactly as before.
+  const refillRowId = newId('ref');
+  const now = new Date().toISOString();
+  try {
+    await c.env.DB!.prepare('INSERT INTO refill_requests (id, user_id, order_id, provider_refill_id, status, created_at) VALUES (?, ?, ?, NULL, ?, ?)')
+      .bind(refillRowId, user.id, order.id, 'pending', now).run();
+  } catch { /* history unavailable pre-migration */ }
   try {
     const refillId = await client.refill(order.provider_order_id);
+    try {
+      await c.env.DB!.prepare("UPDATE refill_requests SET provider_refill_id = ?, status = 'submitted' WHERE id = ?")
+        .bind(refillId || null, refillRowId).run();
+    } catch { /* history unavailable pre-migration */ }
     return c.json({ ok: true, refillId });
   } catch (error) {
+    try {
+      await c.env.DB!.prepare("UPDATE refill_requests SET status = 'failed' WHERE id = ?").bind(refillRowId).run();
+    } catch { /* history unavailable pre-migration */ }
     return c.json({ error: error instanceof Error ? error.message : 'Refill failed' }, 502);
   }
 });

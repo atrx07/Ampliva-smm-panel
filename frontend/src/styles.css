@@ -299,7 +299,10 @@ body { overflow-x: clip; }
 .drawer-item.active svg { color: var(--accent-strong); }
 .drawer-foot { margin-top: auto; padding: 12px 10px 18px; border-top: 1px solid var(--line); }
 
-/* Dashboard profile panel (target of the menu's Profile entry) */
-.profile-panel { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
-.profile-panel h3 { margin: 0; }
-.role-chip { border: 1px solid rgba(155,135,245,.4); color: var(--accent-strong); background: rgba(155,135,245,.1); border-radius: 999px; padding: 5px 11px; font-size: .8rem; font-weight: 700; }
+
+/* Dashboard hub cards + profile rows */
+.hub-card { display: flex; flex-direction: column; }
+.hub-card .ghost-button { align-self: flex-start; margin-top: auto; }
+.profile-rows > div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.profile-rows > div:first-child { padding-top: 0; }
+.profile-rows > div:last-child { border-bottom: 0; padding-bottom: 0; }

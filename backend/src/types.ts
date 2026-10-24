@@ -102,6 +102,16 @@ export interface OrderRow {
   updated_at: string;
 }
 
+export interface RefillRequest {
+  id: string;
+  order_id: string;
+  service_name: string;
+  link: string;
+  provider_refill_id: string | null;
+  status: string;
+  created_at: string;
+}
+
 export interface CidOrderStatus {
   charge?: string;
   start_count?: string;
