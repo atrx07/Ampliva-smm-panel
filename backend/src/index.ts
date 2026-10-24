@@ -92,6 +92,129 @@ app.get('/api/services', async (c) => {
   }
 });
 
+// ---------- tools: instagram profile lookup ----------
+// Public, surface-data-only lookup. Instagram blocks anonymous profile
+// reads (verified), so this reads through IG_SESSIONID — the sessionid of
+// a throwaway account, as a dashboard Secret. Until it is set, lookups
+// answer 503 honestly instead of pretending. Private accounts return
+// their public header only; their posts are never accessible or faked.
+const IG_USERNAME_RE = /^[A-Za-z0-9._]{1,30}$/;
+
+interface IgLookupMediaNode {
+  shortcode?: string;
+  display_url?: string;
+  thumbnail_src?: string;
+  edge_media_to_caption?: { edges?: Array<{ node?: { text?: string } }> };
+  edge_liked_by?: { count?: number };
+  edge_media_to_comment?: { count?: number };
+}
+
+interface IgLookupUser {
+  username?: string;
+  full_name?: string;
+  biography?: string;
+  profile_pic_url_hd?: string;
+  external_url?: string | null;
+  category_name?: string | null;
+  is_verified?: boolean;
+  is_private?: boolean;
+  edge_followed_by?: { count?: number };
+  edge_follow?: { count?: number };
+  edge_owner_to_timeline_media?: { count?: number; edges?: Array<{ node?: IgLookupMediaNode }> };
+}
+
+function toLookupProfile(user: IgLookupUser) {
+  const edges = user.edge_owner_to_timeline_media?.edges ?? [];
+  const recentPosts = edges.slice(0, 12).map(({ node }) => ({
+    shortcode: node?.shortcode ?? '',
+    thumbnail: node?.display_url ?? node?.thumbnail_src ?? '',
+    caption: node?.edge_media_to_caption?.edges?.[0]?.node?.text ?? '',
+    likes: node?.edge_liked_by?.count ?? null,
+    comments: node?.edge_media_to_comment?.count ?? null,
+  })).filter((p) => p.shortcode && p.thumbnail);
+
+  return {
+    username: user.username ?? '',
+    fullName: user.full_name ?? '',
+    bio: user.biography ?? '',
+    avatar: user.profile_pic_url_hd ?? '',
+    website: user.external_url ?? null,
+    category: user.category_name ?? null,
+    posts: user.edge_owner_to_timeline_media?.count ?? 0,
+    followers: user.edge_followed_by?.count ?? 0,
+    following: user.edge_follow?.count ?? 0,
+    isVerified: user.is_verified ?? false,
+    isPrivate: user.is_private ?? false,
+    // Private accounts never expose a timeline to non-followers: an empty
+    // grid there is Instagram's own answer, not a gap we fill in.
+    recentPosts: user.is_private ? [] : recentPosts,
+  };
+}
+
+app.get('/api/tools/lookup', async (c) => {
+  const username = (c.req.query('username') ?? '').trim().replace(/^@/, '');
+  if (!IG_USERNAME_RE.test(username)) {
+    return c.json({ error: 'That does not look like an Instagram username.' }, 400);
+  }
+  const sessionId = c.env.IG_SESSIONID;
+  if (!sessionId) {
+    return c.json({ error: 'Profile lookup is not connected yet — its Instagram session still needs to be set up.' }, 503);
+  }
+  // Cache successful lookups briefly: profiles change slowly, and every
+  // cached hit is one less request against Instagram's rate limits.
+  const cache = (globalThis as unknown as { caches?: CacheStorage }).caches?.default;
+  const cacheKey = new Request(c.req.url, { method: 'GET' });
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch { /* cache is best-effort; a miss just means a fresh fetch */ }
+  }
+  let upstream: Response;
+  try {
+    upstream = await fetch(
+      `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+          'X-IG-App-ID': c.env.IG_APP_ID ?? '936619743392459',
+          'X-Requested-With': 'XMLHttpRequest',
+          Cookie: `sessionid=${sessionId}`,
+        },
+      },
+    );
+  } catch {
+    return c.json({ error: 'Could not reach Instagram. Please try again.' }, 502);
+  }
+  if (upstream.status === 404) {
+    return c.json({ error: `No Instagram profile found for @${username}.` }, 404);
+  }
+  if (upstream.status === 429) {
+    return c.json({ error: 'Instagram is rate-limiting lookups right now. Please try again in a few minutes.' }, 429);
+  }
+  let data: { data?: { user?: IgLookupUser } } | null = null;
+  try {
+    data = await upstream.json() as { data?: { user?: IgLookupUser } };
+  } catch {
+    // A login page instead of JSON means the session died: refresh
+    // IG_SESSIONID and lookups resume.
+    return c.json({ error: 'Instagram refused the request — the lookup session may have expired.' }, 502);
+  }
+  const user = data?.data?.user;
+  if (!user?.username) {
+    return c.json({ error: `No Instagram profile found for @${username}.` }, 404);
+  }
+  const profile = toLookupProfile(user);
+  if (cache) {
+    try {
+      await cache.put(cacheKey, new Response(JSON.stringify(profile), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' },
+      }));
+    } catch { /* best-effort */ }
+  }
+  return c.json(profile);
+});
+
 // ---------- auth ----------
 
 function publicUser(user: { id: string; email: string; role: string }) {

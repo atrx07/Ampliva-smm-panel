@@ -14,6 +14,9 @@ export interface Env {
   RAZORPAY_KEY_ID?: string;
   RAZORPAY_KEY_SECRET?: string;
   RAZORPAY_WEBHOOK_SECRET?: string;
+  /** Instagram Tools: sessionid of a throwaway IG account for profile lookups (dashboard Secret; lookups stay off until set). */
+  IG_SESSIONID?: string;
+  IG_APP_ID?: string;
   SESSION_TTL_DAYS?: string;
 }
 

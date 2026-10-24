@@ -94,6 +94,30 @@ export interface WalletResponse {
   topups: PaymentRequest[];
 }
 
+/** Instagram Tools: profile lookup result (surface data only). */
+export interface LookupPost {
+  shortcode: string;
+  thumbnail: string;
+  caption: string;
+  likes: number | null;
+  comments: number | null;
+}
+
+export interface ProfileResult {
+  username: string;
+  fullName: string;
+  bio: string;
+  avatar: string;
+  website: string | null;
+  category: string | null;
+  posts: number;
+  followers: number;
+  following: number;
+  isVerified: boolean;
+  isPrivate: boolean;
+  recentPosts: LookupPost[];
+}
+
 export interface RefillRequest {
   id: string;
   order_id: string;

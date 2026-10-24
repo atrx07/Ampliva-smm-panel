@@ -314,3 +314,28 @@ body { overflow-x: clip; }
 .row-actions .refill-btn.cooldown .refill-label { text-decoration: line-through; }
 .row-actions .refill-btn.cooldown .refill-foot { font-size: .62rem; color: #b9bec9; font-weight: 400; }
 .cooldown-bubble { position: fixed; z-index: 80; background: #1a1e2e; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: .82rem; color: #e8e6ef; box-shadow: 0 8px 24px rgba(0,0,0,.45); max-width: 220px; pointer-events: none; }
+
+/* Instagram Tools: profile lookup (dark theme, same tokens as the store) */
+.lookup-form { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin: 16px 0; }
+.lookup-form label { flex: 1; min-width: 220px; font-size: .85rem; color: var(--muted); }
+.lookup-input-row { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.04); margin-top: 6px; overflow: hidden; }
+.lookup-input-row span { padding: 0 2px 0 14px; color: var(--muted); }
+.lookup-input-row input { flex: 1; border: 0; outline: 0; background: transparent; color: #fff; padding: 12px 12px 12px 2px; font-size: 1rem; min-width: 0; }
+.lookup-card { margin-top: 8px; }
+.lookup-head { display: flex; gap: 16px; align-items: flex-start; }
+.lookup-avatar { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.lookup-name { font-size: 1.15rem; display: flex; gap: 6px; align-items: center; }
+.lookup-verified { color: #4da3ff; }
+.lookup-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.lookup-badge { font-size: .75rem; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: #d9d7e0; }
+.lookup-badge.private { border-color: rgba(224,90,80,.5); color: #f0a29b; background: rgba(224,90,80,.1); }
+.lookup-badge.public { border-color: rgba(80,200,140,.45); color: #7fdcae; background: rgba(80,200,140,.1); }
+.lookup-bio { white-space: pre-wrap; line-height: 1.5; margin: 16px 0 8px; }
+.lookup-website { word-break: break-all; }
+.lookup-stats { display: flex; gap: 32px; margin: 20px 0; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.lookup-stat strong { display: block; font-size: 1.25rem; }
+.lookup-stat span { font-size: .8rem; color: var(--muted); }
+.lookup-posts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.lookup-post { position: relative; display: block; aspect-ratio: 1; overflow: hidden; border-radius: 10px; background: rgba(255,255,255,.05); }
+.lookup-post img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lookup-post-counts { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 6px; font-size: .72rem; background: rgba(0,0,0,.55); color: #fff; }

@@ -14,6 +14,7 @@ export type IconName =
   | 'shield'
   | 'logout'
   | 'login'
+  | 'search'
   | 'info';
 
 const PATHS: Record<IconName, React.ReactNode> = {
@@ -94,6 +95,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
       <polyline points="10 17 15 12 10 7" />
       <line x1="15" y1="12" x2="3" y2="12" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.5" y2="16.5" />
     </>
   ),
   info: (

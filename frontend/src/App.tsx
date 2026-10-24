@@ -19,6 +19,7 @@ import { Orders } from './views/Orders';
 import { Profile } from './views/Profile';
 import { Refills } from './views/Refills';
 import { Store } from './views/Store';
+import { ToolsLookup } from './views/ToolsLookup';
 import { Wallet } from './views/Wallet';
 import type { AuthUser, PublicConfig, Service, ServicesResponse } from './types';
 
@@ -187,6 +188,10 @@ function App() {
         <LoginPrompt title="Log in to see your refills" text="Your refill history lives here." onLogin={() => setAuthOpen(true)} />
       ))}
 
+      {route === '/tools/lookup' && (
+        <ToolsLookup />
+      )}
+
       {route === '/admin' && (user?.role === 'admin' ? (
         <Admin currency={currency} />
       ) : (
@@ -199,7 +204,7 @@ function App() {
         </main>
       ))}
 
-      {route !== '/' && route !== '/store' && route !== '/dashboard' && route !== '/profile' && route !== '/wallet' && route !== '/orders' && route !== '/refills' && route !== '/admin' && (
+      {route !== '/' && route !== '/store' && route !== '/dashboard' && route !== '/profile' && route !== '/wallet' && route !== '/orders' && route !== '/refills' && route !== '/tools/lookup' && route !== '/admin' && (
         <Landing
           serviceCount={catalog?.services.length ?? 0}
           orderingEnabled={config?.orderingEnabled ?? false}

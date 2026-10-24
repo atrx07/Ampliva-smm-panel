@@ -72,6 +72,9 @@ export function SideMenu({ open, onClose, user, balance, currency, route, go, go
           {item('home', 'Home', 'home', () => go('/'), route === '/')}
           {item('how', 'How it works', 'info', goHow)}
 
+          <div className="drawer-group-label">Tools</div>
+          {item('lookup', 'Profile Lookup', 'search', () => go('/tools/lookup'), route === '/tools/lookup')}
+
           {user && (
             <>
               <div className="drawer-group-label">Account</div>
