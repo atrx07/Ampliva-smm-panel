@@ -405,7 +405,7 @@ app.get('/api/tools/image', async (c) => {
 // tried in order — a 404 means a wrong slug, never a billable run.
 // TEST ONLY: this route takes any reel URL and is ungated. Cap or gate it
 // before it becomes a product endpoint.
-const REEL_COMMENTS_ACTORS = ['flowextract~instagram-comment-scraper', 'flowextract~instagram-reel-comment-scraper'];
+const REEL_COMMENTS_ACTORS = ['flowextract~instagram-comment-scraper', 'flowextract~instagram-reel-comment-scraper', 'flowextractapi~instagram-comment-scraper', 'flowextractapi~instagram-reel-comment-scraper', 'flowextract~instagram-reel-comments-scraper', 'flowextract~instagram-comments-scraper'];
 
 app.post('/api/tools/test-reel-comments', async (c) => {
   const body: { url?: string } = await c.req.json<{ url?: string }>().catch(() => ({}));
