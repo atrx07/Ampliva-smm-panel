@@ -397,6 +397,96 @@ app.get('/api/tools/image', async (c) => {
   });
 });
 
+// Giveaway comments TEST harness: flowextract reel comment scraper.
+// Input: { urls: [{ url }], maxCommentsPerUrl: 0 } per the actor docs;
+// output items carry text, created_at, like_count, user{username, id,
+// is_verified, profile_pic_url}, child_comment_count, source_url.
+// The actor slug is not confirmed in public docs, so candidate slugs are
+// tried in order — a 404 means a wrong slug, never a billable run.
+// TEST ONLY: this route takes any reel URL and is ungated. Cap or gate it
+// before it becomes a product endpoint.
+const REEL_COMMENTS_ACTORS = ['flowextract/instagram-comment-scraper', 'flowextract/instagram-reel-comment-scraper'];
+
+app.post('/api/tools/test-reel-comments', async (c) => {
+  const body: { url?: string } = await c.req.json<{ url?: string }>().catch(() => ({}));
+  const url = String(body.url ?? '').trim();
+  if (!/^https?:\/\/(www\.)?instagram\.com\/(reel|reels|p)\//.test(url)) {
+    return c.json({ error: 'Paste a public Instagram reel URL (/reel/, /reels/ or /p/).' }, 400);
+  }
+  const token = c.env.APIFY_TOKEN;
+  if (!token) {
+    return c.json({ error: 'Profile lookup is not connected yet — its data provider still needs to be set up.' }, 503);
+  }
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  let runId: string | null = null;
+  let actorUsed: string | null = null;
+  for (const actor of REEL_COMMENTS_ACTORS) {
+    const start = await fetch(`https://api.apify.com/v2/acts/${actor}/runs`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ urls: [{ url }], maxCommentsPerUrl: 0 }),
+    }).catch(() => null);
+    if (!start) continue;
+    if (start.status === 404) continue;
+    if (!start.ok) {
+      return c.json({ error: `The comments provider could not start this run (HTTP ${start.status}).` }, 502);
+    }
+    const started = await start.json().catch(() => null) as { data?: { id?: string } } | null;
+    runId = started?.data?.id ?? null;
+    actorUsed = actor;
+    break;
+  }
+  if (!runId) {
+    return c.json({ error: 'The comments actor could not be found. Its store slug may have changed.' }, 502);
+  }
+  return c.json({ status: 'running' as const, runId, actor: actorUsed });
+});
+
+app.get('/api/tools/test-reel-comments', async (c) => {
+  const runId = (c.req.query('runId') ?? '').trim();
+  if (!runId) {
+    return c.json({ error: 'A test run id is required.' }, 400);
+  }
+  const token = c.env.APIFY_TOKEN;
+  if (!token) {
+    return c.json({ error: 'Profile lookup is not connected yet — its data provider still needs to be set up.' }, 503);
+  }
+  const headers = { Authorization: `Bearer ${token}` };
+  const runRes = await fetch(`https://api.apify.com/v2/actor-runs/${encodeURIComponent(runId)}`, { headers });
+  if (!runRes.ok) {
+    return c.json({ error: 'The test run could not be found.' }, 502);
+  }
+  const run = await runRes.json().catch(() => null) as { data?: { status?: string; defaultDatasetId?: string; startedAt?: string; finishedAt?: string; stats?: unknown } } | null;
+  const status = run?.data?.status;
+  if (status === 'RUNNING' || status === 'READY') {
+    return c.json({ status: 'running' as const, runId });
+  }
+  if (status !== 'SUCCEEDED') {
+    return c.json({ error: `The test run did not finish (status: ${status ?? 'unknown'}).` }, 502);
+  }
+  const datasetId = run?.data?.defaultDatasetId;
+  if (!datasetId) {
+    return c.json({ error: 'The test run finished but returned no data.' }, 502);
+  }
+  const itemsRes = await fetch(`https://api.apify.com/v2/datasets/${encodeURIComponent(datasetId)}/items`, { headers });
+  if (!itemsRes.ok) {
+    return c.json({ error: 'The test results could not be read.' }, 502);
+  }
+  const items = await itemsRes.json().catch(() => []) as Record<string, unknown>[];
+  const hasProfilePic = items.some((it) => {
+    const u = it.user as { profile_pic_url?: string } | undefined;
+    return Boolean(u?.profile_pic_url);
+  });
+  return c.json({
+    count: items.length,
+    sample: items.slice(0, 3),
+    hasProfilePic,
+    runStats: run?.data?.stats ?? null,
+    startedAt: run?.data?.startedAt ?? null,
+    finishedAt: run?.data?.finishedAt ?? null,
+  });
+});
+
 // ---------- auth ----------
 
 function publicUser(user: { id: string; email: string; role: string }) {
