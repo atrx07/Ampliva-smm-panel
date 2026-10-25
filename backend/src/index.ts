@@ -107,6 +107,7 @@ app.get('/api/services', async (c) => {
 const IG_USERNAME_RE = /^[A-Za-z0-9._]{1,30}$/;
 const APIFY_ACTOR = 'apify~instagram-profile-scraper';
 const LOOKUP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const NEGATIVE_CACHE_TTL_MS = 60 * 60 * 1000;
 
 interface ApifyPost {
   url?: string;
@@ -188,14 +189,25 @@ function isGhostProfile(profile: LookupProfile): boolean {
     && profile.recentPosts.length === 0;
 }
 
-async function getCachedProfile(db: D1Database | undefined, username: string): Promise<{ profile: LookupProfile; fresh: boolean } | null> {
+// A cached row is either a real profile (24h TTL) or a recorded not-found
+// (1h TTL, stored as a sentinel so repeat typos cost nothing). The shorter
+// negative TTL bounds the damage if an account is created under that name
+// later — it becomes findable within the hour.
+type CachedLookup =
+  | { profile: LookupProfile; fresh: boolean; notFound: false }
+  | { profile: null; fresh: boolean; notFound: true };
+
+async function getCachedProfile(db: D1Database | undefined, username: string): Promise<CachedLookup | null> {
   if (!db) return null;
   try {
     const row = await db.prepare('SELECT profile, fetched_at FROM lookup_cache WHERE username = ?').bind(username.toLowerCase()).first<{ profile: string; fetched_at: string }>();
     if (!row) return null;
-    const profile = JSON.parse(row.profile) as LookupProfile;
+    const parsed = JSON.parse(row.profile) as LookupProfile & { notFound?: boolean };
     const age = Date.now() - Date.parse(row.fetched_at);
-    return { profile, fresh: Number.isFinite(age) && age < LOOKUP_CACHE_TTL_MS };
+    if (parsed.notFound) {
+      return { profile: null, fresh: Number.isFinite(age) && age < NEGATIVE_CACHE_TTL_MS, notFound: true };
+    }
+    return { profile: parsed, fresh: Number.isFinite(age) && age < LOOKUP_CACHE_TTL_MS, notFound: false };
   } catch {
     // Cache table missing (migration not pasted yet) or unreadable:
     // lookups still work, just without caching.
@@ -208,6 +220,16 @@ async function putCachedProfile(db: D1Database | undefined, profile: LookupProfi
   try {
     await db.prepare('INSERT INTO lookup_cache (username, profile, fetched_at) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET profile = excluded.profile, fetched_at = excluded.fetched_at')
       .bind(profile.username.toLowerCase(), JSON.stringify(profile), new Date().toISOString()).run();
+  } catch {
+    // Best-effort: a missing cache table must never break a lookup.
+  }
+}
+
+async function putNotFoundProfile(db: D1Database | undefined, username: string): Promise<void> {
+  if (!db || !username) return;
+  try {
+    await db.prepare('INSERT INTO lookup_cache (username, profile, fetched_at) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET profile = excluded.profile, fetched_at = excluded.fetched_at')
+      .bind(username.toLowerCase(), JSON.stringify({ notFound: true, username: username.toLowerCase() }), new Date().toISOString()).run();
   } catch {
     // Best-effort: a missing cache table must never break a lookup.
   }
@@ -229,13 +251,23 @@ app.post('/api/tools/lookup', async (c) => {
     return c.json({ error: 'That does not look like an Instagram username.' }, 400);
   }
   let cached = await getCachedProfile(c.env.DB, username);
-  if (cached && isGhostProfile(cached.profile)) {
+  if (cached?.notFound) {
+    // Repeat typo within the hour: answer from the negative cache without
+    // spending another Apify result. A stale one is dropped so the name is
+    // re-checked — an account may have been created under it since.
+    if (cached.fresh) {
+      return c.json({ error: `No Instagram profile found for @${username}.` }, 404);
+    }
+    await deleteCachedProfile(c.env.DB, username);
+    cached = null;
+  }
+  if (cached && !cached.notFound && isGhostProfile(cached.profile)) {
     // A ghost cached before this fix must never be served again, including
     // by the fallbacks below — drop it and fall through to a fresh run.
     await deleteCachedProfile(c.env.DB, username);
     cached = null;
   }
-  if (cached?.fresh) {
+  if (cached && !cached.notFound && cached.fresh) {
     return c.json({ ...cached.profile, cached: true });
   }
   const token = c.env.APIFY_TOKEN;
@@ -303,7 +335,7 @@ app.get('/api/tools/lookup', async (c) => {
   }
   if (status !== 'SUCCEEDED') {
     const cached = username ? await getCachedProfile(c.env.DB, username) : null;
-    if (cached && !isGhostProfile(cached.profile)) return c.json({ ...cached.profile, cached: true });
+    if (cached && !cached.notFound && !isGhostProfile(cached.profile)) return c.json({ ...cached.profile, cached: true });
     return c.json({ error: 'The lookup run did not finish. Please try again.' }, 502);
   }
   const datasetId = run?.data?.defaultDatasetId;
@@ -322,11 +354,13 @@ app.get('/api/tools/lookup', async (c) => {
   const items = await itemsRes.json().catch(() => []) as ApifyProfileItem[];
   const item = items[0];
   if (!item?.username) {
+    if (username) await putNotFoundProfile(c.env.DB, username);
     return c.json({ error: username ? `No Instagram profile found for @${username}.` : 'No Instagram profile found.' }, 404);
   }
   const profile = toLookupProfile(item);
   if (isGhostProfile(profile)) {
     await deleteCachedProfile(c.env.DB, profile.username || username);
+    await putNotFoundProfile(c.env.DB, username || profile.username);
     return c.json({ error: username ? `No Instagram profile found for @${username}.` : 'No Instagram profile found.' }, 404);
   }
   await putCachedProfile(c.env.DB, profile);
