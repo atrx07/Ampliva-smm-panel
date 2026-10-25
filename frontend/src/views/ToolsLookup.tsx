@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { pollLookup, startLookup } from '../api';
+import { pollLookup, proxyImageUrl, startLookup } from '../api';
 import { formatNumber } from '../lib/format';
 import type { ProfileResult } from '../types';
 
@@ -31,7 +31,7 @@ function ProfileCard({ profile }: { profile: ProfileResult }) {
       <div className="lookup-head">
         <img
           className="lookup-avatar"
-          src={profile.avatar}
+          src={proxyImageUrl(profile.avatar)}
           alt={`${profile.username}'s profile picture`}
           referrerPolicy="no-referrer"
         />
@@ -77,7 +77,7 @@ function ProfileCard({ profile }: { profile: ProfileResult }) {
               const inner = (
                 <>
                   {post.thumbnail ? (
-                    <img src={post.thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                    <img src={proxyImageUrl(post.thumbnail)} alt="" loading="lazy" referrerPolicy="no-referrer" />
                   ) : (
                     <span className="lookup-post-text">{post.caption || post.shortcode || 'Post'}</span>
                   )}

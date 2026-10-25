@@ -302,6 +302,36 @@ app.get('/api/tools/lookup', async (c) => {
   return c.json(profile);
 });
 
+// Image proxy: Instagram's CDN does not reliably serve its images to every
+// browser/network (hotlink and tracker blocks break <img> loads on some
+// phones), while the Worker origin itself is proven reachable from the
+// storefront. Only Instagram CDN hosts are allowed through, so this cannot
+// become an open proxy.
+app.get('/api/tools/image', async (c) => {
+  const raw = c.req.query('u') || '';
+  let target: URL;
+  try {
+    target = new URL(raw);
+  } catch {
+    return c.json({ error: 'A valid image URL is required.' }, 400);
+  }
+  if (target.protocol !== 'https:' || !target.hostname.endsWith('.cdninstagram.com')) {
+    return c.json({ error: 'Only Instagram CDN images can be proxied.' }, 400);
+  }
+  const res = await fetch(target.toString(), {
+    headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' },
+  });
+  if (!res.ok || !res.body) {
+    return c.json({ error: 'The image could not be loaded from Instagram.' }, 502);
+  }
+  return new Response(res.body, {
+    headers: {
+      'Content-Type': res.headers.get('content-type') || 'image/jpeg',
+      'Cache-Control': 'public, max-age=86400',
+    },
+  });
+});
+
 // ---------- auth ----------
 
 function publicUser(user: { id: string; email: string; role: string }) {

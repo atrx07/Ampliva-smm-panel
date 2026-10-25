@@ -55,6 +55,14 @@ export function pollLookup(runId: string, username: string): Promise<LookupStart
   return api<LookupStart | ProfileResult>(`/api/tools/lookup?runId=${encodeURIComponent(runId)}&username=${encodeURIComponent(username)}`);
 }
 
+// Instagram CDN images are routed through the Worker (see /api/tools/image):
+// some phones and networks block cdninstagram.com outright, while the Worker
+// origin is proven reachable from the storefront.
+export function proxyImageUrl(raw: string): string {
+  if (!raw) return '';
+  return `${API_BASE}/api/tools/image?u=${encodeURIComponent(raw)}`;
+}
+
 export function getConfig(): Promise<PublicConfig> {
   return api<PublicConfig>('/api/config');
 }
