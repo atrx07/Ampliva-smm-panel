@@ -176,6 +176,18 @@ function toLookupProfile(item: ApifyProfileItem) {
 
 type LookupProfile = ReturnType<typeof toLookupProfile>;
 
+// Apify echoes the requested username in a stub item even when the account
+// does not exist — every other field empty, every count zero. Serving that
+// as a card would present a non-existent account as a real one with zero
+// stats, so ghosts are treated as "not found" and never cached. A real
+// account always has at least a profile picture (Instagram assigns a
+// default), so the combination below cannot match a genuine profile.
+function isGhostProfile(profile: LookupProfile): boolean {
+  return !profile.avatar && !profile.fullName && !profile.bio
+    && profile.posts === 0 && profile.followers === 0 && profile.following === 0
+    && profile.recentPosts.length === 0;
+}
+
 async function getCachedProfile(db: D1Database | undefined, username: string): Promise<{ profile: LookupProfile; fresh: boolean } | null> {
   if (!db) return null;
   try {
@@ -192,12 +204,21 @@ async function getCachedProfile(db: D1Database | undefined, username: string): P
 }
 
 async function putCachedProfile(db: D1Database | undefined, profile: LookupProfile): Promise<void> {
-  if (!db || !profile.username) return;
+  if (!db || !profile.username || isGhostProfile(profile)) return;
   try {
     await db.prepare('INSERT INTO lookup_cache (username, profile, fetched_at) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET profile = excluded.profile, fetched_at = excluded.fetched_at')
       .bind(profile.username.toLowerCase(), JSON.stringify(profile), new Date().toISOString()).run();
   } catch {
     // Best-effort: a missing cache table must never break a lookup.
+  }
+}
+
+async function deleteCachedProfile(db: D1Database | undefined, username: string): Promise<void> {
+  if (!db || !username) return;
+  try {
+    await db.prepare('DELETE FROM lookup_cache WHERE username = ?').bind(username.toLowerCase()).run();
+  } catch {
+    // Best-effort.
   }
 }
 
@@ -207,7 +228,13 @@ app.post('/api/tools/lookup', async (c) => {
   if (!IG_USERNAME_RE.test(username)) {
     return c.json({ error: 'That does not look like an Instagram username.' }, 400);
   }
-  const cached = await getCachedProfile(c.env.DB, username);
+  let cached = await getCachedProfile(c.env.DB, username);
+  if (cached && isGhostProfile(cached.profile)) {
+    // A ghost cached before this fix must never be served again, including
+    // by the fallbacks below — drop it and fall through to a fresh run.
+    await deleteCachedProfile(c.env.DB, username);
+    cached = null;
+  }
   if (cached?.fresh) {
     return c.json({ ...cached.profile, cached: true });
   }
@@ -276,7 +303,7 @@ app.get('/api/tools/lookup', async (c) => {
   }
   if (status !== 'SUCCEEDED') {
     const cached = username ? await getCachedProfile(c.env.DB, username) : null;
-    if (cached) return c.json({ ...cached.profile, cached: true });
+    if (cached && !isGhostProfile(cached.profile)) return c.json({ ...cached.profile, cached: true });
     return c.json({ error: 'The lookup run did not finish. Please try again.' }, 502);
   }
   const datasetId = run?.data?.defaultDatasetId;
@@ -298,6 +325,10 @@ app.get('/api/tools/lookup', async (c) => {
     return c.json({ error: username ? `No Instagram profile found for @${username}.` : 'No Instagram profile found.' }, 404);
   }
   const profile = toLookupProfile(item);
+  if (isGhostProfile(profile)) {
+    await deleteCachedProfile(c.env.DB, profile.username || username);
+    return c.json({ error: username ? `No Instagram profile found for @${username}.` : 'No Instagram profile found.' }, 404);
+  }
   await putCachedProfile(c.env.DB, profile);
   return c.json(profile);
 });
