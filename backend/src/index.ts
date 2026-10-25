@@ -176,7 +176,11 @@ app.get('/api/tools/lookup', async (c) => {
       `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
       {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+          // Instagram binds the session to the User-Agent that created it:
+          // any other UA is rejected ("useragent mismatch"). IG_USER_AGENT
+          // must be the exact UA of the browser where the throwaway logged
+          // in; the iPhone string below is only a fallback.
+          'User-Agent': c.env.IG_USER_AGENT ?? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
           'X-IG-App-ID': c.env.IG_APP_ID ?? '936619743392459',
           'X-Requested-With': 'XMLHttpRequest',
           Cookie: `sessionid=${sessionId}`,

@@ -17,6 +17,9 @@ export interface Env {
   /** Instagram Tools: sessionid of a throwaway IG account for profile lookups (dashboard Secret; lookups stay off until set). */
   IG_SESSIONID?: string;
   IG_APP_ID?: string;
+  /** Instagram Tools: the exact User-Agent of the browser that created IG_SESSIONID (plain Variable, not secret).
+   *  Instagram binds the session to its login UA — any other UA is rejected ("useragent mismatch"). */
+  IG_USER_AGENT?: string;
   SESSION_TTL_DAYS?: string;
 }
 
