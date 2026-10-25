@@ -14,12 +14,8 @@ export interface Env {
   RAZORPAY_KEY_ID?: string;
   RAZORPAY_KEY_SECRET?: string;
   RAZORPAY_WEBHOOK_SECRET?: string;
-  /** Instagram Tools: sessionid of a throwaway IG account for profile lookups (dashboard Secret; lookups stay off until set). */
-  IG_SESSIONID?: string;
-  IG_APP_ID?: string;
-  /** Instagram Tools: the exact User-Agent of the browser that created IG_SESSIONID (plain Variable, not secret).
-   *  Instagram binds the session to its login UA — any other UA is rejected ("useragent mismatch"). */
-  IG_USER_AGENT?: string;
+  /** Instagram Tools: Apify API token for profile lookups (dashboard Secret; lookups answer 503 until set). */
+  APIFY_TOKEN?: string;
   SESSION_TTL_DAYS?: string;
 }
 

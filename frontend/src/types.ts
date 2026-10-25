@@ -97,6 +97,7 @@ export interface WalletResponse {
 /** Instagram Tools: profile lookup result (surface data only). */
 export interface LookupPost {
   shortcode: string;
+  url: string;
   thumbnail: string;
   caption: string;
   likes: number | null;
@@ -115,6 +116,8 @@ export interface ProfileResult {
   following: number;
   isVerified: boolean;
   isPrivate: boolean;
+  /** True when this result came from the 24h cache instead of a fresh lookup. */
+  cached?: boolean;
   recentPosts: LookupPost[];
 }
 

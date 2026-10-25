@@ -42,8 +42,17 @@ export function getServices(): Promise<ServicesResponse> {
   return api<ServicesResponse>('/api/services');
 }
 
-export function lookupProfile(username: string): Promise<ProfileResult> {
-  return api<ProfileResult>(`/api/tools/lookup?username=${encodeURIComponent(username)}`);
+export interface LookupStart {
+  status: 'running';
+  runId: string;
+}
+
+export function startLookup(username: string): Promise<LookupStart | ProfileResult> {
+  return api<LookupStart | ProfileResult>('/api/tools/lookup', { method: 'POST', body: JSON.stringify({ username }) });
+}
+
+export function pollLookup(runId: string, username: string): Promise<LookupStart | ProfileResult> {
+  return api<LookupStart | ProfileResult>(`/api/tools/lookup?runId=${encodeURIComponent(runId)}&username=${encodeURIComponent(username)}`);
 }
 
 export function getConfig(): Promise<PublicConfig> {

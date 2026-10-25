@@ -93,129 +93,212 @@ app.get('/api/services', async (c) => {
 });
 
 // ---------- tools: instagram profile lookup ----------
-// Public, surface-data-only lookup. Instagram blocks anonymous profile
-// reads (verified), so this reads through IG_SESSIONID — the sessionid of
-// a throwaway account, as a dashboard Secret. Until it is set, lookups
-// answer 503 honestly instead of pretending. Private accounts return
-// their public header only; their posts are never accessible or faked.
+// Profile lookup via Apify's Instagram Profile Scraper. No Instagram
+// session is held anywhere: the Worker calls Apify's API with an APIFY_TOKEN
+// dashboard Secret, and Apify absorbs the proxy/blocking problem.
+// Flow: POST /api/tools/lookup { username } starts an actor run and returns
+// a runId (or a cached profile immediately); the page polls
+// GET /api/tools/lookup?runId=...&username=... until the run succeeds.
+// Results are cached in D1 for 24h, so repeat lookups cost nothing and
+// a stale cache can cover an Apify outage. Until APIFY_TOKEN is set, the
+// endpoint answers 503 honestly. When Apify's credit is exhausted, the
+// endpoint falls back to cache or answers 402 honestly — it never spends
+// money the owner did not approve.
 const IG_USERNAME_RE = /^[A-Za-z0-9._]{1,30}$/;
+const APIFY_ACTOR = 'apify~instagram-profile-scraper';
+const LOOKUP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-interface IgLookupMediaNode {
-  shortcode?: string;
-  display_url?: string;
-  thumbnail_src?: string;
-  edge_media_to_caption?: { edges?: Array<{ node?: { text?: string } }> };
-  edge_liked_by?: { count?: number };
-  edge_media_to_comment?: { count?: number };
+interface ApifyPost {
+  url?: string;
+  displayUrl?: string;
+  imageUrl?: string;
+  thumbnail?: string;
+  caption?: string;
+  likesCount?: number;
+  likes?: number;
+  commentsCount?: number;
+  comments?: number;
+  id?: string;
 }
 
-interface IgLookupUser {
+interface ApifyProfileItem {
   username?: string;
-  full_name?: string;
+  fullName?: string;
   biography?: string;
-  profile_pic_url_hd?: string;
-  external_url?: string | null;
-  category_name?: string | null;
-  is_verified?: boolean;
-  is_private?: boolean;
-  edge_followed_by?: { count?: number };
-  edge_follow?: { count?: number };
-  edge_owner_to_timeline_media?: { count?: number; edges?: Array<{ node?: IgLookupMediaNode }> };
+  profilePicUrl?: string;
+  profilePicUrlHD?: string;
+  externalUrl?: string | null;
+  businessCategoryName?: string | null;
+  postsCount?: number;
+  followersCount?: number;
+  followsCount?: number;
+  verified?: boolean;
+  private?: boolean;
+  latestPosts?: ApifyPost[];
 }
 
-function toLookupProfile(user: IgLookupUser) {
-  const edges = user.edge_owner_to_timeline_media?.edges ?? [];
-  const recentPosts = edges.slice(0, 12).map(({ node }) => ({
-    shortcode: node?.shortcode ?? '',
-    thumbnail: node?.display_url ?? node?.thumbnail_src ?? '',
-    caption: node?.edge_media_to_caption?.edges?.[0]?.node?.text ?? '',
-    likes: node?.edge_liked_by?.count ?? null,
-    comments: node?.edge_media_to_comment?.count ?? null,
-  })).filter((p) => p.shortcode && p.thumbnail);
+function shortcodeFromUrl(url: string): string {
+  const m = url.match(/\/p\/([^/?#]+)/);
+  return m ? m[1] : '';
+}
+
+function toLookupProfile(item: ApifyProfileItem) {
+  const recentPosts = (item.latestPosts ?? []).slice(0, 12).map((p) => {
+    const url = p.url ?? '';
+    const shortcode = shortcodeFromUrl(url) || p.id || '';
+    return {
+      shortcode,
+      url: url || (shortcode ? `https://www.instagram.com/p/${shortcode}/` : ''),
+      thumbnail: p.displayUrl ?? p.imageUrl ?? p.thumbnail ?? '',
+      caption: p.caption ?? '',
+      likes: p.likesCount ?? p.likes ?? null,
+      comments: p.commentsCount ?? p.comments ?? null,
+    };
+  }).filter((p) => p.url || p.thumbnail);
 
   return {
-    username: user.username ?? '',
-    fullName: user.full_name ?? '',
-    bio: user.biography ?? '',
-    avatar: user.profile_pic_url_hd ?? '',
-    website: user.external_url ?? null,
-    category: user.category_name ?? null,
-    posts: user.edge_owner_to_timeline_media?.count ?? 0,
-    followers: user.edge_followed_by?.count ?? 0,
-    following: user.edge_follow?.count ?? 0,
-    isVerified: user.is_verified ?? false,
-    isPrivate: user.is_private ?? false,
-    // Private accounts never expose a timeline to non-followers: an empty
-    // grid there is Instagram's own answer, not a gap we fill in.
-    recentPosts: user.is_private ? [] : recentPosts,
+    username: item.username ?? '',
+    fullName: item.fullName ?? '',
+    bio: item.biography ?? '',
+    avatar: item.profilePicUrlHD ?? item.profilePicUrl ?? '',
+    website: item.externalUrl ?? null,
+    category: item.businessCategoryName ?? null,
+    posts: item.postsCount ?? 0,
+    followers: item.followersCount ?? 0,
+    following: item.followsCount ?? 0,
+    isVerified: item.verified ?? false,
+    isPrivate: item.private ?? false,
+    // Private accounts expose no timeline to non-followers: an empty
+    // grid there is the provider's own answer, not a gap we fill in.
+    recentPosts: item.private ? [] : recentPosts,
   };
 }
 
-app.get('/api/tools/lookup', async (c) => {
-  const username = (c.req.query('username') ?? '').trim().replace(/^@/, '');
+type LookupProfile = ReturnType<typeof toLookupProfile>;
+
+async function getCachedProfile(db: D1Database | undefined, username: string): Promise<{ profile: LookupProfile; fresh: boolean } | null> {
+  if (!db) return null;
+  try {
+    const row = await db.prepare('SELECT profile, fetched_at FROM lookup_cache WHERE username = ?').bind(username.toLowerCase()).first<{ profile: string; fetched_at: string }>();
+    if (!row) return null;
+    const profile = JSON.parse(row.profile) as LookupProfile;
+    const age = Date.now() - Date.parse(row.fetched_at);
+    return { profile, fresh: Number.isFinite(age) && age < LOOKUP_CACHE_TTL_MS };
+  } catch {
+    // Cache table missing (migration not pasted yet) or unreadable:
+    // lookups still work, just without caching.
+    return null;
+  }
+}
+
+async function putCachedProfile(db: D1Database | undefined, profile: LookupProfile): Promise<void> {
+  if (!db || !profile.username) return;
+  try {
+    await db.prepare('INSERT INTO lookup_cache (username, profile, fetched_at) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET profile = excluded.profile, fetched_at = excluded.fetched_at')
+      .bind(profile.username.toLowerCase(), JSON.stringify(profile), new Date().toISOString()).run();
+  } catch {
+    // Best-effort: a missing cache table must never break a lookup.
+  }
+}
+
+app.post('/api/tools/lookup', async (c) => {
+  const body: { username?: string } = await c.req.json<{ username?: string }>().catch(() => ({}));
+  const username = String(body.username ?? '').trim().replace(/^@/, '');
   if (!IG_USERNAME_RE.test(username)) {
     return c.json({ error: 'That does not look like an Instagram username.' }, 400);
   }
-  const sessionId = c.env.IG_SESSIONID;
-  if (!sessionId) {
-    return c.json({ error: 'Profile lookup is not connected yet — its Instagram session still needs to be set up.' }, 503);
+  const cached = await getCachedProfile(c.env.DB, username);
+  if (cached?.fresh) {
+    return c.json({ ...cached.profile, cached: true });
   }
-  // Cache successful lookups briefly: profiles change slowly, and every
-  // cached hit is one less request against Instagram's rate limits.
-  const cache = (globalThis as unknown as { caches?: CacheStorage }).caches?.default;
-  const cacheKey = new Request(c.req.url, { method: 'GET' });
-  if (cache) {
-    try {
-      const hit = await cache.match(cacheKey);
-      if (hit) return hit;
-    } catch { /* cache is best-effort; a miss just means a fresh fetch */ }
+  const token = c.env.APIFY_TOKEN;
+  if (!token) {
+    if (cached) return c.json({ ...cached.profile, cached: true });
+    return c.json({ error: 'Profile lookup is not connected yet — its data provider still needs to be set up.' }, 503);
   }
-  let upstream: Response;
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  let start: Response;
   try {
-    upstream = await fetch(
-      `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-      {
-        headers: {
-          // Instagram binds the session to the User-Agent that created it:
-          // any other UA is rejected ("useragent mismatch"). IG_USER_AGENT
-          // must be the exact UA of the browser where the throwaway logged
-          // in; the iPhone string below is only a fallback.
-          'User-Agent': c.env.IG_USER_AGENT ?? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-          'X-IG-App-ID': c.env.IG_APP_ID ?? '936619743392459',
-          'X-Requested-With': 'XMLHttpRequest',
-          Cookie: `sessionid=${sessionId}`,
-        },
-      },
-    );
+    start = await fetch(`https://api.apify.com/v2/acts/${APIFY_ACTOR}/runs`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ usernames: [username] }),
+    });
   } catch {
-    return c.json({ error: 'Could not reach Instagram. Please try again.' }, 502);
+    if (cached) return c.json({ ...cached.profile, cached: true });
+    return c.json({ error: 'Could not reach the lookup provider. Please try again.' }, 502);
   }
-  if (upstream.status === 404) {
-    return c.json({ error: `No Instagram profile found for @${username}.` }, 404);
+  if (start.status === 401 || start.status === 403) {
+    if (cached) return c.json({ ...cached.profile, cached: true });
+    return c.json({ error: 'The lookup provider rejected the request. Its access key may be wrong or out of credit.' }, 502);
   }
-  if (upstream.status === 429) {
-    return c.json({ error: 'Instagram is rate-limiting lookups right now. Please try again in a few minutes.' }, 429);
+  if (start.status === 402) {
+    if (cached) return c.json({ ...cached.profile, cached: true });
+    return c.json({ error: 'This month’s free lookup credit is used up — lookups resume when it resets.' }, 402);
   }
-  let data: { data?: { user?: IgLookupUser } } | null = null;
+  if (!start.ok) {
+    if (cached) return c.json({ ...cached.profile, cached: true });
+    return c.json({ error: 'The lookup provider could not start this search. Please try again.' }, 502);
+  }
+  const started = await start.json().catch(() => null) as { data?: { id?: string } } | null;
+  const runId = started?.data?.id;
+  if (!runId) {
+    if (cached) return c.json({ ...cached.profile, cached: true });
+    return c.json({ error: 'The lookup provider could not start this search. Please try again.' }, 502);
+  }
+  return c.json({ status: 'running' as const, runId });
+});
+
+app.get('/api/tools/lookup', async (c) => {
+  const runId = (c.req.query('runId') ?? '').trim();
+  const username = (c.req.query('username') ?? '').trim().replace(/^@/, '');
+  if (!runId) {
+    return c.json({ error: 'A lookup run id is required to check a result.' }, 400);
+  }
+  const token = c.env.APIFY_TOKEN;
+  if (!token) {
+    return c.json({ error: 'Profile lookup is not connected yet — its data provider still needs to be set up.' }, 503);
+  }
+  const headers = { Authorization: `Bearer ${token}` };
+  let runRes: Response;
   try {
-    data = await upstream.json() as { data?: { user?: IgLookupUser } };
+    runRes = await fetch(`https://api.apify.com/v2/actor-runs/${encodeURIComponent(runId)}`, { headers });
   } catch {
-    // A login page instead of JSON means the session died: refresh
-    // IG_SESSIONID and lookups resume.
-    return c.json({ error: 'Instagram refused the request — the lookup session may have expired.' }, 502);
+    return c.json({ error: 'Could not reach the lookup provider. Please try again.' }, 502);
   }
-  const user = data?.data?.user;
-  if (!user?.username) {
-    return c.json({ error: `No Instagram profile found for @${username}.` }, 404);
+  if (!runRes.ok) {
+    return c.json({ error: 'The lookup run could not be found. Please start a new search.' }, 502);
   }
-  const profile = toLookupProfile(user);
-  if (cache) {
-    try {
-      await cache.put(cacheKey, new Response(JSON.stringify(profile), {
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' },
-      }));
-    } catch { /* best-effort */ }
+  const run = await runRes.json().catch(() => null) as { data?: { status?: string; defaultDatasetId?: string } } | null;
+  const status = run?.data?.status;
+  if (status === 'RUNNING' || status === 'READY') {
+    return c.json({ status: 'running' as const, runId });
   }
+  if (status !== 'SUCCEEDED') {
+    const cached = username ? await getCachedProfile(c.env.DB, username) : null;
+    if (cached) return c.json({ ...cached.profile, cached: true });
+    return c.json({ error: 'The lookup run did not finish. Please try again.' }, 502);
+  }
+  const datasetId = run?.data?.defaultDatasetId;
+  if (!datasetId) {
+    return c.json({ error: 'The lookup run finished but returned no data.' }, 502);
+  }
+  let itemsRes: Response;
+  try {
+    itemsRes = await fetch(`https://api.apify.com/v2/datasets/${encodeURIComponent(datasetId)}/items`, { headers });
+  } catch {
+    return c.json({ error: 'Could not reach the lookup provider. Please try again.' }, 502);
+  }
+  if (!itemsRes.ok) {
+    return c.json({ error: 'The lookup run finished but its results could not be read.' }, 502);
+  }
+  const items = await itemsRes.json().catch(() => []) as ApifyProfileItem[];
+  const item = items[0];
+  if (!item?.username) {
+    return c.json({ error: username ? `No Instagram profile found for @${username}.` : 'No Instagram profile found.' }, 404);
+  }
+  const profile = toLookupProfile(item);
+  await putCachedProfile(c.env.DB, profile);
   return c.json(profile);
 });
 
