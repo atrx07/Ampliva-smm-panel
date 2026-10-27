@@ -4,7 +4,7 @@ import { listDbServices, normalizeServiceType, normalizeServices, previewService
 import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
-import { notifyDiscord } from './notify';
+import { notifyDiscord, notifyOrderPlaced, notifyRefillSubmitted } from './notify';
 import { buildPendingMessage, buildUsersMessage, notifyTopupRequest, registerDiscordCommands, verifyDiscordSignature } from './discord';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
 import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
@@ -856,6 +856,13 @@ app.post('/api/orders', async (c) => {
     note: `${publicService.name} × ${quantity}`,
   });
 
+  // Real-time owner ping on the webhook (#ampliva-alerts). Fire-and-forget:
+  // a Discord failure must never slow down or break the order response.
+  c.executionCtx.waitUntil(notifyOrderPlaced(c.env, {
+    email: user.email, serviceName: publicService.name, orderId, providerOrderId,
+    link, quantity, charge, balanceAfter: newBalance, extras,
+  }));
+
   return c.json({ orderId, providerOrderId, charge, balance: newBalance, status: 'Pending' }, 201);
 });
 
@@ -933,6 +940,13 @@ app.post('/api/orders/:id/refill', async (c) => {
       await c.env.DB!.prepare("UPDATE refill_requests SET provider_refill_id = ?, status = 'submitted' WHERE id = ?")
         .bind(refillId || null, refillRowId).run();
     } catch { /* history unavailable pre-migration */ }
+    // Same webhook channel as orders; only on provider acceptance, never on
+    // a failed refill (that row just stays 'failed' in history).
+    c.executionCtx.waitUntil(notifyRefillSubmitted(c.env, {
+      email: user.email, serviceName: order.service_name, orderId: order.id,
+      providerOrderId: order.provider_order_id ?? '', refillId: refillId || '',
+      refillRowId, link: order.link, quantity: order.quantity,
+    }));
     return c.json({ ok: true, refillId });
   } catch (error) {
     try {
