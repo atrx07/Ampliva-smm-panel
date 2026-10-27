@@ -10,6 +10,13 @@ export interface Env {
   PUBLIC_UPI_ID?: string;
   /** Optional Discord webhook URL for owner notifications (secret; dashboard-only). */
   ADMIN_DISCORD_WEBHOOK?: string;
+  /** Discord app for top-up approve/reject buttons (dashboard Secrets; see discord.ts).
+   *  Bot token + channel id send the alert; public key verifies interactions;
+   *  admin user id restricts clicks to the owner. */
+  DISCORD_BOT_TOKEN?: string;
+  DISCORD_CHANNEL_ID?: string;
+  DISCORD_PUBLIC_KEY?: string;
+  ADMIN_DISCORD_USER_ID?: string;
   /** Razorpay gateway (all three dashboard Secrets; feature stays off until set). */
   RAZORPAY_KEY_ID?: string;
   RAZORPAY_KEY_SECRET?: string;

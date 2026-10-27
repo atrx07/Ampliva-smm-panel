@@ -5,6 +5,7 @@ import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord } from './notify';
+import { notifyTopupRequest, verifyDiscordSignature } from './discord';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
 import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
 
@@ -593,12 +594,10 @@ app.post('/api/wallet/topups', async (c) => {
     .bind(id, user.id, round2(amount), 'upi', txnRef, 'pending', new Date().toISOString())
     .run();
   // Ping the owner immediately — an unnoticed request is a stranded customer.
+  // Bot alert carries Approve/Reject buttons; falls back to the webhook text
+  // ping (dashboard link) until the Discord app is configured.
   c.executionCtx.waitUntil(
-    notifyDiscord(
-      c.env,
-      '💰 New top-up request',
-      `₹${round2(amount).toFixed(2)} from ${user.email}\nUTR: \`${txnRef}\`\nVerify the UTR in your bank app, then approve: https://ampliva-store.pages.dev → Admin → Top-up requests`,
-    ),
+    notifyTopupRequest(c.env, { id, amount: round2(amount), email: user.email, txnRef }),
   );
   return c.json({ id, status: 'pending' }, 201);
 });
@@ -1046,32 +1045,97 @@ app.get('/api/admin/topups', async (c) => {
   return c.json({ topups: rows.results ?? [] });
 });
 
+// Shared by the dashboard approve/reject routes and the Discord button
+// handler below, so a top-up can never be credited twice or decided two
+// ways: only a pending request moves, and approval always appends the ledger.
+async function decideTopup(
+  db: D1Database,
+  id: string,
+  decision: 'approved' | 'rejected',
+  decidedBy: string,
+): Promise<{ ok: true; balance?: number } | { error: string; status: 404 | 409 }> {
+  const topup = await db.prepare('SELECT * FROM payment_requests WHERE id = ?').bind(id)
+    .first<{ id: string; user_id: string; amount: number; status: string }>();
+  if (!topup) return { error: 'Top-up request not found', status: 404 };
+  if (topup.status !== 'pending') return { error: `Already ${topup.status}`, status: 409 };
+  await db.prepare('UPDATE payment_requests SET status = ?, decided_at = ?, decided_by = ? WHERE id = ?')
+    .bind(decision, new Date().toISOString(), decidedBy, id).run();
+  if (decision === 'approved') {
+    const balance = await appendLedger(db, {
+      userId: topup.user_id, type: 'topup', amount: topup.amount,
+      refType: 'payment_request', refId: topup.id, note: 'UPI top-up approved',
+    });
+    return { ok: true, balance };
+  }
+  return { ok: true };
+}
+
 app.post('/api/admin/topups/:id/approve', async (c) => {
   const admin = await requireAdmin(c);
   if (isResponse(admin)) return admin;
-  const db = c.env.DB!;
-  const topup = await db.prepare('SELECT * FROM payment_requests WHERE id = ?').bind(c.req.param('id')).first<{ id: string; user_id: string; amount: number; status: string }>();
-  if (!topup) return c.json({ error: 'Top-up request not found' }, 404);
-  if (topup.status !== 'pending') return c.json({ error: `Already ${topup.status}` }, 409);
-  await db.prepare('UPDATE payment_requests SET status = ?, decided_at = ?, decided_by = ? WHERE id = ?')
-    .bind('approved', new Date().toISOString(), admin.id, topup.id).run();
-  const balance = await appendLedger(db, {
-    userId: topup.user_id, type: 'topup', amount: topup.amount,
-    refType: 'payment_request', refId: topup.id, note: 'UPI top-up approved',
-  });
-  return c.json({ ok: true, userBalance: balance });
+  const result = await decideTopup(c.env.DB!, c.req.param('id'), 'approved', admin.id);
+  if ('error' in result) return c.json({ error: result.error }, result.status);
+  return c.json({ ok: true, userBalance: result.balance });
 });
 
 app.post('/api/admin/topups/:id/reject', async (c) => {
   const admin = await requireAdmin(c);
   if (isResponse(admin)) return admin;
-  const db = c.env.DB!;
-  const topup = await db.prepare('SELECT * FROM payment_requests WHERE id = ?').bind(c.req.param('id')).first<{ id: string; status: string }>();
-  if (!topup) return c.json({ error: 'Top-up request not found' }, 404);
-  if (topup.status !== 'pending') return c.json({ error: `Already ${topup.status}` }, 409);
-  await db.prepare('UPDATE payment_requests SET status = ?, decided_at = ?, decided_by = ? WHERE id = ?')
-    .bind('rejected', new Date().toISOString(), admin.id, topup.id).run();
+  const result = await decideTopup(c.env.DB!, c.req.param('id'), 'rejected', admin.id);
+  if ('error' in result) return c.json({ error: result.error }, result.status);
   return c.json({ ok: true });
+});
+
+// ---------- Discord app interactions (top-up approve/reject buttons) ----------
+// No session auth here by design: the Ed25519 signature IS the auth (it
+// proves Discord sent this for our app), and the clicker must be the owner.
+app.post('/api/discord/interactions', async (c) => {
+  const signature = c.req.header('X-Signature-Ed25519');
+  const timestamp = c.req.header('X-Signature-Timestamp');
+  const rawBody = await c.req.text();
+  if (
+    !c.env.DISCORD_PUBLIC_KEY || !signature || !timestamp ||
+    !(await verifyDiscordSignature(c.env.DISCORD_PUBLIC_KEY, timestamp, rawBody, signature))
+  ) {
+    return c.json({ error: 'Invalid signature' }, 401);
+  }
+  const interaction = JSON.parse(rawBody) as {
+    type: number;
+    data?: { custom_id?: string };
+    member?: { user?: { id?: string } };
+    user?: { id?: string };
+  };
+  if (interaction.type === 1) return c.json({ type: 1 }); // Discord PING
+  if (interaction.type !== 3) return c.json({ error: 'Unsupported interaction' }, 400);
+  const ephemeral = (content: string) => c.json({ type: 4, data: { content, flags: 64 } });
+  const match = /^topup:(approve|reject):(.+)$/.exec(String(interaction.data?.custom_id || ''));
+  if (!match) return ephemeral('Unknown button.');
+  if (!c.env.ADMIN_DISCORD_USER_ID) return ephemeral('Owner approvals are not configured yet.');
+  const clickerId = interaction.member?.user?.id ?? interaction.user?.id;
+  if (clickerId !== c.env.ADMIN_DISCORD_USER_ID) return ephemeral('Only the store owner can decide top-ups.');
+  const decision = match[1] === 'approve' ? 'approved' : 'rejected';
+  const db = c.env.DB!;
+  const result = await decideTopup(db, match[2], decision, 'discord');
+  if ('error' in result && result.status === 404) return ephemeral('Top-up request not found.');
+  // Converge the message to the request's current state, buttons removed,
+  // so a stale or double-tapped message can never decide twice.
+  const fresh = await db.prepare(
+    `SELECT p.*, u.email AS user_email FROM payment_requests p JOIN users u ON u.id = p.user_id WHERE p.id = ?`,
+  ).bind(match[2]).first<{ amount: number; txn_ref: string; status: string; user_email: string }>();
+  if (!fresh) return ephemeral('Top-up request not found.');
+  const decided = fresh.status === 'approved' ? '✅ Top-up approved' : fresh.status === 'rejected' ? '❌ Top-up rejected' : '💰 Top-up request';
+  return c.json({
+    type: 7,
+    data: {
+      embeds: [{
+        title: decided,
+        description: `₹${Number(fresh.amount).toFixed(2)} from ${fresh.user_email}\nUTR: \`${fresh.txn_ref}\``,
+        color: fresh.status === 'approved' ? 0x2ecc71 : fresh.status === 'rejected' ? 0xe74c3c : 0x7c5cff,
+        timestamp: new Date().toISOString(),
+      }],
+      components: [],
+    },
+  });
 });
 
 app.get('/api/admin/orders', async (c) => {
