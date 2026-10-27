@@ -21,6 +21,15 @@ export function Wallet({ currency, config, onBalanceChange }: {
   // Raw text state, parsed via `amount` — same leading-zero trap as quantity.
   const [amountText, setAmountText] = useState('100');
   const amount = Math.max(0, Math.floor(Number(amountText) || 0));
+  // UPI caps one transaction at ₹1,00,000, and a number input's min/max
+  // attributes don't stop typing or pasting — so clamp on every keystroke.
+  // Empty string is preserved so the field stays clearable.
+  const handleAmountChange = (raw: string) => {
+    if (raw === '') { setAmountText(''); return; }
+    const n = Math.floor(Number(raw));
+    if (!Number.isFinite(n)) return;
+    setAmountText(String(Math.min(100000, Math.max(0, n))));
+  };
   const [txnRef, setTxnRef] = useState('');
   const [topupMsg, setTopupMsg] = useState<string | null>(null);
   const [razorpayBusy, setRazorpayBusy] = useState(false);
@@ -136,7 +145,7 @@ export function Wallet({ currency, config, onBalanceChange }: {
               instead so the instant button still has an amount to charge. */}
           {!config?.manualTopupsEnabled && config?.razorpayEnabled && (
             <div className="form-stack">
-              <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
+              <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => handleAmountChange(e.target.value)} placeholder="100" /></label>
             </div>
           )}
           {RAZORPAY_PARKED ? (
@@ -161,7 +170,8 @@ export function Wallet({ currency, config, onBalanceChange }: {
                 <li><strong>Submit it below</strong> — your balance lands after a quick verification.</li>
               </ol>
               <div className="form-stack">
-                <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
+                <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => handleAmountChange(e.target.value)} placeholder="100" /></label>
+                <span className="muted">UPI limit: ₹10 – ₹1,00,000 per top-up.</span>
               </div>
               <div className="upi-pay-box">
                 <div className="upi-qr"><QRCodeSVG value={upiLink} size={140} /></div>
