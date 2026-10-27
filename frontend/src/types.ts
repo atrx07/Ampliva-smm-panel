@@ -151,6 +151,8 @@ export interface AdminStats {
   users: number;
   activeServices: number;
   orders: number;
+  successfulOrders: number;
+  failedOrders: number;
   revenue: number;
   providerCost: number;
   refunds: number;

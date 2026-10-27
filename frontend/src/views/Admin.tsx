@@ -110,7 +110,7 @@ export function Admin({ currency }: { currency: string }) {
         <div className="stat-grid">
           <article><strong>{stats.users}</strong><span>users</span></article>
           <article><strong>{stats.activeServices}</strong><span>active services</span></article>
-          <article><strong>{stats.orders}</strong><span>orders</span></article>
+          <article><strong>{stats.orders}</strong><span>orders</span><span>{stats.successfulOrders} completed · {stats.failedOrders} canceled</span></article>
           <article><strong>{formatMoney(stats.revenue, currency)}</strong><span>revenue</span></article>
           <article><strong>{formatMoney(stats.grossMargin, currency)}</strong><span>gross margin</span></article>
           <article><strong>{stats.providerBalance === null ? '—' : formatMoney(stats.providerBalance, currency)}</strong><span>CID balance</span></article>

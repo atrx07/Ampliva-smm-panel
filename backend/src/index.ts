@@ -1063,7 +1063,22 @@ app.get('/api/admin/stats', async (c) => {
   const db = c.env.DB!;
   const users = await db.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
   const services = await db.prepare('SELECT COUNT(*) AS n FROM services WHERE is_active = 1 AND provider_active = 1').first<{ n: number }>();
-  const orders = await db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(charge), 0) AS revenue, COALESCE(SUM(provider_cost), 0) AS cost, COALESCE(SUM(refund_amount), 0) AS refunds FROM orders').first<{ n: number; revenue: number; cost: number; refunds: number }>();
+  // Total orders is COUNT(*) — every order ever placed, so it never drops
+  // when one cancels. Cost counts only the delivered share of each order:
+  // scaling provider_cost by (charge - refund) / charge means a refunded
+  // order stops contributing its catalogue-rate cost, so the margin gives
+  // back only the 35% markup on the undelivered part instead of the full
+  // charge. refund <= charge by construction (refund = charge *
+  // undelivered / quantity); the COALESCE fallback keeps a zero-charge
+  // order's full cost rather than NULLing it out of the sum.
+  const orders = await db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(charge), 0) AS revenue,
+     COALESCE(SUM(COALESCE(provider_cost * (charge - refund_amount) / NULLIF(charge, 0), provider_cost)), 0) AS cost,
+     COALESCE(SUM(refund_amount), 0) AS refunds,
+     COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) AS successful,
+     COALESCE(SUM(CASE WHEN status = 'Canceled' THEN 1 ELSE 0 END), 0) AS failed
+     FROM orders`,
+  ).first<{ n: number; revenue: number; cost: number; refunds: number; successful: number; failed: number }>();
   const pendingTopups = await db.prepare("SELECT COUNT(*) AS n FROM payment_requests WHERE status = 'pending'").first<{ n: number }>();
   let providerBalance: number | null = null;
   const client = cidClientFromEnv(c.env);
@@ -1074,6 +1089,8 @@ app.get('/api/admin/stats', async (c) => {
     users: Number(users?.n ?? 0),
     activeServices: Number(services?.n ?? 0),
     orders: Number(orders?.n ?? 0),
+    successfulOrders: Number(orders?.successful ?? 0),
+    failedOrders: Number(orders?.failed ?? 0),
     revenue: round2(Number(orders?.revenue ?? 0)),
     providerCost: round2(Number(orders?.cost ?? 0)),
     refunds: round2(Number(orders?.refunds ?? 0)),
