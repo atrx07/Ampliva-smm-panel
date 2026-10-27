@@ -179,7 +179,7 @@ export function Admin({ currency }: { currency: string }) {
         {!orders.length && <p className="modal-sub">No orders yet.</p>}
         <div className="table-wrap">
           <table>
-            <thead><tr><th>When</th><th>Customer</th><th>Service</th><th>Qty</th><th>Charge</th><th>Cost</th><th>Status</th></tr></thead>
+            <thead><tr><th>When</th><th>Customer</th><th>Service</th><th>Qty</th><th>Charge</th><th>Cost</th><th>Status</th><th>Inputs</th></tr></thead>
             <tbody>
               {orders.map((o) => (
                 <tr key={o.id}>
@@ -190,6 +190,9 @@ export function Admin({ currency }: { currency: string }) {
                   <td>{formatMoney(o.charge, currency)}</td>
                   <td>{formatMoney(o.provider_cost, currency)}</td>
                   <td>{o.status}</td>
+                  <td>{o.extras
+                    ? <span title={o.extras.slice(0, 1000)}>{o.extras.slice(0, 120)}{o.extras.length > 120 ? '…' : ''}</span>
+                    : '—'}</td>
                 </tr>
               ))}
             </tbody>

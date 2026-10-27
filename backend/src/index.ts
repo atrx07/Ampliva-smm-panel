@@ -692,6 +692,44 @@ app.post('/api/payments/razorpay/webhook', async (c) => {
 
 // ---------- orders ----------
 
+// Storage cap for order extras (migration 0006). The provider always
+// receives the FULL inputs — this cap is storage-only, so delivery is never
+// shorted. 64KB covers ~600 typical comments in full; beyond that the
+// earliest lines are kept, and orders.quantity still records the exact
+// total line count for comment/username services, so nothing is silently
+// lost — the record just stops at the cap.
+const ORDER_EXTRAS_MAX_BYTES = 65536;
+const ORDER_EXTRAS_MAX_LINES = 1000;
+const ORDER_EXTRAS_MAX_LINE_CHARS = 500;
+
+function capOrderExtras(extras: Record<string, string>): string | null {
+  if (!Object.keys(extras).length) return null;
+  const capped: Record<string, string> = {};
+  for (const [key, value] of Object.entries(extras)) {
+    const lines = value.split('\n').slice(0, ORDER_EXTRAS_MAX_LINES).map((line) =>
+      line.length > ORDER_EXTRAS_MAX_LINE_CHARS ? `${line.slice(0, ORDER_EXTRAS_MAX_LINE_CHARS - 1)}…` : line,
+    );
+    capped[key] = lines.join('\n');
+  }
+  const byteLen = (s: string) => new TextEncoder().encode(s).length;
+  let json = JSON.stringify(capped);
+  // Still over budget (many long fields): halve the largest field's lines
+  // until it fits. Terminates: an empty object is 2 bytes.
+  while (byteLen(json) > ORDER_EXTRAS_MAX_BYTES) {
+    let largestKey = '';
+    let largestLen = 0;
+    for (const [key, value] of Object.entries(capped)) {
+      if (value.length > largestLen) { largestLen = value.length; largestKey = key; }
+    }
+    if (!largestKey) break;
+    const lines = capped[largestKey].split('\n');
+    if (lines.length <= 1) delete capped[largestKey];
+    else capped[largestKey] = lines.slice(0, Math.max(1, Math.floor(lines.length / 2))).join('\n');
+    json = JSON.stringify(capped);
+  }
+  return json;
+}
+
 async function refreshOrderStatus(env: Env, order: OrderRow): Promise<OrderRow> {
   const client = cidClientFromEnv(env);
   if (!client || !order.provider_order_id || !env.DB) return order;
@@ -840,13 +878,25 @@ app.post('/api/orders', async (c) => {
   const orderId = newId('ord');
   const now = new Date().toISOString();
   const publicService = rowToPublic(service);
-  await db
-    .prepare(
-      `INSERT INTO orders (id, user_id, service_id, service_name, provider_order_id, link, quantity, charge, provider_cost, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
-    )
-    .bind(orderId, user.id, service.id, publicService.name, providerOrderId, link, quantity, charge, providerCost, now, now)
-    .run();
+  const baseColumns = 'id, user_id, service_id, service_name, provider_order_id, link, quantity, charge, provider_cost, status, created_at, updated_at';
+  const baseValues = `?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?`;
+  const baseBind = [orderId, user.id, service.id, publicService.name, providerOrderId, link, quantity, charge, providerCost, now, now];
+  const extrasJson = capOrderExtras(extras);
+  try {
+    if (extrasJson === null) {
+      await db.prepare(`INSERT INTO orders (${baseColumns}) VALUES (${baseValues})`).bind(...baseBind).run();
+    } else {
+      await db.prepare(`INSERT INTO orders (${baseColumns}, extras) VALUES (${baseValues}, ?)`).bind(...baseBind, extrasJson).run();
+    }
+  } catch (err) {
+    // Pre-migration database (0006 not pasted yet): the extras column does
+    // not exist. The order must still go through — it just records no inputs.
+    if (extrasJson !== null && err instanceof Error && /no such column/i.test(err.message)) {
+      await db.prepare(`INSERT INTO orders (${baseColumns}) VALUES (${baseValues})`).bind(...baseBind).run();
+    } else {
+      throw err;
+    }
+  }
   const newBalance = await appendLedger(db, {
     userId: user.id,
     type: 'order_debit',

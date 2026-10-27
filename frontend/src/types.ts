@@ -79,6 +79,8 @@ export interface Order {
   quantity: number;
   charge: number;
   provider_cost: number;
+  /** JSON of the inputs sent to CID (migration 0006); null when none stored. */
+  extras?: string | null;
   status: string;
   start_count: number | null;
   remains: number | null;

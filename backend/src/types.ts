@@ -107,6 +107,9 @@ export interface OrderRow {
   quantity: number;
   charge: number;
   provider_cost: number;
+  /** JSON of the type-specific inputs sent to CID (migration 0006); NULL for
+   *  orders placed before it, or services with no extra inputs. */
+  extras: string | null;
   status: string;
   start_count: number | null;
   remains: number | null;
