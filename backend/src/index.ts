@@ -1112,7 +1112,7 @@ app.post('/api/discord/interactions', async (c) => {
   if (!match) return ephemeral('Unknown button.');
   if (!c.env.ADMIN_DISCORD_USER_ID) return ephemeral('Owner approvals are not configured yet.');
   const clickerId = interaction.member?.user?.id ?? interaction.user?.id;
-  if (clickerId !== c.env.ADMIN_DISCORD_USER_ID) return ephemeral('Only the store owner can decide top-ups.');
+  if (clickerId !== c.env.ADMIN_DISCORD_USER_ID.trim()) return ephemeral('Only the store owner can decide top-ups.');
   const decision = match[1] === 'approve' ? 'approved' : 'rejected';
   const db = c.env.DB!;
   const result = await decideTopup(db, match[2], decision, 'discord');
