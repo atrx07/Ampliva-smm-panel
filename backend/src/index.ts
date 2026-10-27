@@ -735,7 +735,15 @@ async function refreshOrderStatus(env: Env, order: OrderRow): Promise<OrderRow> 
   if (!client || !order.provider_order_id || !env.DB) return order;
   try {
     const status = await client.status(order.provider_order_id);
-    const nextStatus = status.status || order.status;
+    // CID spells it "Cancelled" (two L's); canonicalize to "Canceled" so
+    // the refund guard, the sweep's terminal list and the stats counters
+    // all agree. Without this, a cancelled order flips status but never
+    // refunds and never counts as failed — exactly what happened to
+    // AMP-1005 (Discord showed Cancelled, dashboard showed 0 canceled,
+    // margin unchanged, no refund). A row already stored as "Cancelled"
+    // heals itself on the next refresh, which then also fires its refund.
+    const rawStatus = status.status || order.status;
+    const nextStatus = rawStatus.toLowerCase() === 'cancelled' ? 'Canceled' : rawStatus;
     const remains = status.remains !== undefined ? Number(status.remains) : order.remains;
     const startCount = status.start_count !== undefined ? Number(status.start_count) : order.start_count;
     const now = new Date().toISOString();
@@ -1070,13 +1078,15 @@ app.get('/api/admin/stats', async (c) => {
   // back only the 35% markup on the undelivered part instead of the full
   // charge. refund <= charge by construction (refund = charge *
   // undelivered / quantity); the COALESCE fallback keeps a zero-charge
-  // order's full cost rather than NULLing it out of the sum.
+  // order's full cost rather than NULLing it out of the sum. Failed counts
+  // both spellings so a row stored under CID's "Cancelled" still counts
+  // before the next sweep normalizes it.
   const orders = await db.prepare(
     `SELECT COUNT(*) AS n, COALESCE(SUM(charge), 0) AS revenue,
      COALESCE(SUM(COALESCE(provider_cost * (charge - refund_amount) / NULLIF(charge, 0), provider_cost)), 0) AS cost,
      COALESCE(SUM(refund_amount), 0) AS refunds,
      COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) AS successful,
-     COALESCE(SUM(CASE WHEN status = 'Canceled' THEN 1 ELSE 0 END), 0) AS failed
+     COALESCE(SUM(CASE WHEN status IN ('Canceled', 'Cancelled') THEN 1 ELSE 0 END), 0) AS failed
      FROM orders`,
   ).first<{ n: number; revenue: number; cost: number; refunds: number; successful: number; failed: number }>();
   const pendingTopups = await db.prepare("SELECT COUNT(*) AS n FROM payment_requests WHERE status = 'pending'").first<{ n: number }>();
@@ -1409,6 +1419,9 @@ app.onError((error, c) => {
 // already fails soft per order, so one bad order never stops the sweep.
 // The exclusion list fails open: any status string not listed here still
 // gets polled, so a new CID status can never silently drop out of view.
+// "Cancelled" (two L's) is deliberately NOT listed: a row stored under
+// CID's spelling must keep polling until a refresh normalizes it to
+// "Canceled" — listing it here would freeze it unrefunded forever.
 async function refreshOpenOrders(env: Env): Promise<void> {
   if (!env.DB) return;
   try {
