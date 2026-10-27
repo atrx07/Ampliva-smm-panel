@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   adminApproveTopup,
   adminOrders,
+  adminRegisterDiscordCommands,
   adminRejectTopup,
   adminServices as fetchAdminServices,
   adminStats,
@@ -44,6 +45,16 @@ export function Admin({ currency }: { currency: string }) {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
+    }
+  }
+
+  async function registerDiscord() {
+    setMsg(null);
+    try {
+      const result = await adminRegisterDiscordCommands();
+      setMsg(`Discord commands registered: ${result.count} commands. Try /pending in your server.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed');
     }
   }
 
@@ -106,6 +117,12 @@ export function Admin({ currency }: { currency: string }) {
           <article><strong>{stats.pendingTopups}</strong><span>pending top-ups</span></article>
         </div>
       )}
+
+      <article className="panel wide">
+        <h3>Discord bot</h3>
+        <p className="modal-sub">Registers /pending, /users and /adjust in your Discord server (guild-scoped, instant). Needs DISCORD_APP_ID and DISCORD_GUILD_ID in the Worker first.</p>
+        <button className="primary-button" type="button" onClick={registerDiscord}>Register bot commands</button>
+      </article>
 
       <article className="panel wide">
         <h3>Top-up requests</h3>

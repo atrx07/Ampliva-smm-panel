@@ -17,6 +17,10 @@ export interface Env {
   DISCORD_CHANNEL_ID?: string;
   DISCORD_PUBLIC_KEY?: string;
   ADMIN_DISCORD_USER_ID?: string;
+  /** Slash-command registration (dashboard variables, not secrets): app Client
+   *  ID + server ID, for guild-scoped /pending, /users, /adjust. */
+  DISCORD_APP_ID?: string;
+  DISCORD_GUILD_ID?: string;
   /** Razorpay gateway (all three dashboard Secrets; feature stays off until set). */
   RAZORPAY_KEY_ID?: string;
   RAZORPAY_KEY_SECRET?: string;

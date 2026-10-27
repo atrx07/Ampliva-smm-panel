@@ -5,7 +5,7 @@ import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord } from './notify';
-import { notifyTopupRequest, verifyDiscordSignature } from './discord';
+import { buildPendingMessage, buildUsersMessage, notifyTopupRequest, registerDiscordCommands, verifyDiscordSignature } from './discord';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
 import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
 
@@ -1101,20 +1101,136 @@ app.post('/api/discord/interactions', async (c) => {
   }
   const interaction = JSON.parse(rawBody) as {
     type: number;
-    data?: { custom_id?: string };
+    id?: string;
+    data?: { custom_id?: string; name?: string; options?: Array<{ name: string; value?: string | number }> };
     member?: { user?: { id?: string } };
     user?: { id?: string };
+    message?: { embeds?: Array<{ fields?: Array<{ name: string; value: string }> }> };
   };
   if (interaction.type === 1) return c.json({ type: 1 }); // Discord PING
-  if (interaction.type !== 3) return c.json({ error: 'Unsupported interaction' }, 400);
+  // Owner gate first, for commands and buttons alike: nothing below runs for
+  // anyone else, and no store data leaks into a stranger's error path.
   const ephemeral = (content: string) => c.json({ type: 4, data: { content, flags: 64 } });
-  const match = /^topup:(approve|reject):(.+)$/.exec(String(interaction.data?.custom_id || ''));
-  if (!match) return ephemeral('Unknown button.');
   if (!c.env.ADMIN_DISCORD_USER_ID) return ephemeral('Owner approvals are not configured yet.');
   const clickerId = interaction.member?.user?.id ?? interaction.user?.id;
-  if (clickerId !== c.env.ADMIN_DISCORD_USER_ID.trim()) return ephemeral('Only the store owner can decide top-ups.');
-  const decision = match[1] === 'approve' ? 'approved' : 'rejected';
+  if (clickerId !== c.env.ADMIN_DISCORD_USER_ID.trim()) {
+    return ephemeral(interaction.type === 2 ? 'Only the store owner can use admin commands.' : 'Only the store owner can decide top-ups.');
+  }
   const db = c.env.DB!;
+
+  // ---------- Slash commands (type 2). All replies are ephemeral: customer
+  // emails and balances never land in the channel, only in the owner's view.
+  if (interaction.type === 2) {
+    const options = Object.fromEntries((interaction.data?.options ?? []).map((o) => [o.name, o.value]));
+    const name = interaction.data?.name;
+    if (name === 'pending') {
+      const msg = await buildPendingMessage(db);
+      return c.json({ type: 4, data: { ...msg, flags: 64 } });
+    }
+    if (name === 'users') {
+      const msg = await buildUsersMessage(db, String(options.query ?? ''), 0);
+      return c.json({ type: 4, data: { ...msg, flags: 64 } });
+    }
+    if (name === 'adjust') {
+      const email = String(options.user ?? '').trim();
+      const amount = Number(options.amount);
+      const reason = String(options.reason ?? '').trim() || 'Balance adjusted via Discord';
+      if (!email || !Number.isInteger(amount) || Math.abs(amount) > 100000) {
+        return ephemeral('Invalid adjustment. Amount must be a whole number between -100000 and 100000.');
+      }
+      const user = await db.prepare('SELECT id, email FROM users WHERE LOWER(email) = LOWER(?)').bind(email).first<{ id: string; email: string }>();
+      if (!user) return ephemeral(`No user found with email ${email}. Find the exact email with /users first.`);
+      const balance = await getBalance(db, user.id);
+      const newBalance = Math.round((balance + amount) * 100) / 100;
+      if (newBalance < 0) return ephemeral(`That would take ${user.email} to ₹${newBalance.toFixed(2)} — balances can't go below zero.`);
+      // Reason travels in the confirm embed's Reason field, not the button id
+      // (free text can contain ':'), and is read back on confirm.
+      return c.json({
+        type: 4,
+        data: {
+          flags: 64,
+          embeds: [{
+            title: 'Confirm balance adjustment',
+            fields: [
+              { name: 'User', value: user.email },
+              { name: 'Current balance', value: `₹${balance.toFixed(2)}` },
+              { name: 'Adjustment', value: `${amount >= 0 ? '+' : ''}₹${amount.toFixed(2)}` },
+              { name: 'New balance', value: `₹${newBalance.toFixed(2)}` },
+              { name: 'Reason', value: reason },
+            ],
+            color: 0x7c5cff,
+          }],
+          components: [{
+            type: 1,
+            components: [
+              { type: 2, style: 3, label: 'Confirm', custom_id: `adjust:confirm:${user.id}:${amount}` },
+              { type: 2, style: 4, label: 'Cancel', custom_id: `adjust:cancel:${user.id}` },
+            ],
+          }],
+        },
+      });
+    }
+    return ephemeral('Unknown command.');
+  }
+
+  if (interaction.type !== 3) return c.json({ error: 'Unsupported interaction' }, 400);
+
+  // ---------- Buttons (type 3).
+  // Pending-queue buttons refresh the whole list after deciding, so the queue
+  // stays usable instead of collapsing to one request.
+  const pendingMatch = /^pending:(approve|reject):(.+)$/.exec(String(interaction.data?.custom_id || ''));
+  if (pendingMatch) {
+    const decision = pendingMatch[1] === 'approve' ? 'approved' : 'rejected';
+    const result = await decideTopup(db, pendingMatch[2], decision, 'discord');
+    if ('error' in result && result.status === 404) return ephemeral('Top-up request not found.');
+    const msg = await buildPendingMessage(db);
+    return c.json({ type: 7, data: msg });
+  }
+
+  const usersMatch = /^users:(\d+):(.*)$/.exec(String(interaction.data?.custom_id || ''));
+  if (usersMatch) {
+    const msg = await buildUsersMessage(db, usersMatch[2], Number(usersMatch[1]));
+    return c.json({ type: 7, data: msg });
+  }
+
+  const adjustMatch = /^adjust:(confirm|cancel):([^:]+)(?::(-?\d+))?$/.exec(String(interaction.data?.custom_id || ''));
+  if (adjustMatch) {
+    const userId = adjustMatch[2];
+    if (adjustMatch[1] === 'cancel') {
+      return c.json({ type: 7, data: { embeds: [{ title: '❌ Adjustment cancelled', description: 'No balance was changed.', color: 0xe74c3c }], components: [] } });
+    }
+    const amount = Number(adjustMatch[3]);
+    const user = await db.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first<{ email: string }>();
+    if (!user) return ephemeral('User not found.');
+    // Re-check the balance at confirm time: it may have moved since the
+    // command ran, and a debit must never push it below zero.
+    const balance = await getBalance(db, userId);
+    if (Math.round((balance + amount) * 100) / 100 < 0) {
+      return ephemeral('That adjustment no longer fits this balance — it may have changed since you confirmed.');
+    }
+    const reasonField = interaction.message?.embeds?.[0]?.fields?.find((f) => f.name === 'Reason');
+    const reason = reasonField?.value || 'Balance adjusted via Discord';
+    const newBalance = await appendLedger(db, {
+      userId, type: 'admin_adjust', amount,
+      refType: 'discord_adjust', refId: `discord:${interaction.id ?? ''}`,
+      note: reason,
+    });
+    return c.json({
+      type: 7,
+      data: {
+        embeds: [{
+          title: '✅ Balance adjusted',
+          description: `${user.email}: ${amount >= 0 ? '+' : ''}₹${amount.toFixed(2)} → new balance ₹${newBalance.toFixed(2)}\nReason: ${reason}`,
+          color: 0x2ecc71,
+        }],
+        components: [],
+      },
+    });
+  }
+
+  const match = /^topup:(approve|reject):(.+)$/.exec(String(interaction.data?.custom_id || ''));
+  if (!match) return ephemeral('Unknown button.');
+  const decision = match[1] === 'approve' ? 'approved' : 'rejected';
   const result = await decideTopup(db, match[2], decision, 'discord');
   if ('error' in result && result.status === 404) return ephemeral('Top-up request not found.');
   // Converge the message to the request's current state, buttons removed,
@@ -1136,6 +1252,17 @@ app.post('/api/discord/interactions', async (c) => {
       components: [],
     },
   });
+});
+
+app.post('/api/admin/discord/register-commands', async (c) => {
+  const admin = await requireAdmin(c);
+  if (isResponse(admin)) return admin;
+  try {
+    const count = await registerDiscordCommands(c.env);
+    return c.json({ ok: true, count });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Registration failed' }, 502);
+  }
 });
 
 app.get('/api/admin/orders', async (c) => {

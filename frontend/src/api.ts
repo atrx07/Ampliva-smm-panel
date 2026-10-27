@@ -125,6 +125,10 @@ export function adminSync(): Promise<{ ok: boolean; serviceCount: number; synced
   return api('/api/admin/sync', { method: 'POST' });
 }
 
+export function adminRegisterDiscordCommands(): Promise<{ ok: boolean; count: number }> {
+  return api('/api/admin/discord/register-commands', { method: 'POST' });
+}
+
 export function adminStats(): Promise<AdminStats> {
   return api('/api/admin/stats');
 }
