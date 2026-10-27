@@ -1383,9 +1383,46 @@ app.onError((error, c) => {
   return c.json({ error: 'Internal server error' }, 500);
 });
 
+// 15-minute status sweep (cron "*/15 * * * *"): refresh every order that
+// is still open, oldest first, so a status can never go stale the way
+// AMP-1002..1005 did (Pending locally, Completed/Canceled at CID).
+// Terminal states are skipped: Completed, Canceled, Partial and Refunded
+// never move again, and polling them forever would crowd the sweep.
+// Sequential on purpose: one CID call at a time, and refreshOrderStatus
+// already fails soft per order, so one bad order never stops the sweep.
+// The exclusion list fails open: any status string not listed here still
+// gets polled, so a new CID status can never silently drop out of view.
+async function refreshOpenOrders(env: Env): Promise<void> {
+  if (!env.DB) return;
+  try {
+    const rows = await env.DB
+      .prepare(
+        `SELECT * FROM orders WHERE provider_order_id IS NOT NULL
+         AND status NOT IN ('Completed', 'Canceled', 'Partial', 'Refunded')
+         ORDER BY created_at ASC LIMIT 50`,
+      )
+      .all<OrderRow>();
+    for (const order of rows.results ?? []) {
+      await refreshOrderStatus(env, order);
+    }
+  } catch (error) {
+    console.error('Open-order sweep failed:', error instanceof Error ? error.message : 'unknown');
+  }
+}
+
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    // Gated by trigger (see wrangler.toml — keep the expressions in sync).
+    // The 15-minute trigger runs only the sweep; the daily trigger runs
+    // only the top-up nag + catalogue sync. Without this gate, the
+    // 15-minute trigger would also run the full catalogue sync 96 times
+    // a day. An unknown or manual trigger gets the cheap, idempotent
+    // sweep only — never the catalogue sync.
+    if (event.cron !== '17 3 * * *') {
+      ctx.waitUntil(refreshOpenOrders(env));
+      return;
+    }
     if (env.DB) {
       // Nag the owner about top-up requests left pending > 4h, so a customer
       // is never stranded just because the dashboard went unchecked.

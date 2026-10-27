@@ -24,9 +24,11 @@ database_name = "ampliva-db"
 database_id = "f03b50d9-ece5-4509-9885-656030ebe42e"
 migrations_dir = "migrations"
 
-# Daily catalogue sync at 03:17 UTC.
+# Daily catalogue sync at 03:17 UTC, plus an open-order status sweep every
+# 15 minutes. The scheduled() handler gates by trigger string — keep these
+# expressions in sync with the gate there.
 [triggers]
-crons = ["17 3 * * *"]
+crons = ["17 3 * * *", "*/15 * * * *"]
 
 [secrets]
 required = ["CID_API_KEY"]
