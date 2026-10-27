@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelOrder, getOrders, getRefills, refillOrder, refreshOrder } from '../api';
-import { formatMoney, formatNumber } from '../lib/format';
+import { formatMoney, formatNumber, formatOrderRef } from '../lib/format';
 import type { Order, RefillRequest } from '../types';
 
 // Cooldown after a successful refill: the Refill button turns red and
@@ -146,12 +146,13 @@ export function Orders({ currency }: { currency: string }) {
         {!orders.length && <p className="modal-sub">No orders yet — pick a service from the catalogue to place your first one.</p>}
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Service</th><th>Link</th><th>Qty</th><th>Charge</th><th>Status</th><th>Remains</th><th></th></tr></thead>
+            <thead><tr><th>Order</th><th>Service</th><th>Link</th><th>Qty</th><th>Charge</th><th>Status</th><th>Remains</th><th></th></tr></thead>
             <tbody>
               {orders.map((o) => {
                 const endsAt = o.service_refill === 1 ? cooldownEndsAt(o.id) : null;
                 return (
                   <tr key={o.id}>
+                    <td>{formatOrderRef(o.id, o.order_number)}</td>
                     <td>{o.service_name}</td>
                     <td className="link-cell"><a href={o.link} target="_blank" rel="noreferrer">{o.link}</a></td>
                     <td>{formatNumber(o.quantity)}</td>

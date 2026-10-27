@@ -1,5 +1,5 @@
 import type { Env } from './types';
-import { notifyDiscord } from './notify';
+import { formatOrderRef, notifyDiscord } from './notify';
 
 /**
  * Discord app interactions for owner approvals.
@@ -254,6 +254,7 @@ function pageButtons(prefix: string, safePage: number, maxPage: number, query: s
 
 interface OrderHistoryRow {
   id: string;
+  order_number: number | null;
   email: string;
   service_name: string;
   quantity: number;
@@ -262,20 +263,7 @@ interface OrderHistoryRow {
   created_at: string;
 }
 
-export async function buildOrdersMessage(db: D1Database, query: string, page: number) {
-  const like = `%${query.trim()}%`;
-  const totalRow = await db.prepare(
-    'SELECT COUNT(*) AS n FROM orders o JOIN users u ON u.id = o.user_id WHERE u.email LIKE ?',
-  ).bind(like).first<{ n: number }>();
-  const total = Number(totalRow?.n ?? 0);
-  const maxPage = Math.max(0, Math.ceil(total / HISTORY_PAGE_SIZE) - 1);
-  const safePage = Math.min(Math.max(0, page), maxPage);
-  const rows = await db.prepare(
-    `SELECT o.id, u.email AS email, o.service_name, o.quantity, o.charge, o.status, o.created_at
-     FROM orders o JOIN users u ON u.id = o.user_id
-     WHERE u.email LIKE ? ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
-  ).bind(like, HISTORY_PAGE_SIZE, safePage * HISTORY_PAGE_SIZE).all();
-  const list = (rows.results ?? []) as unknown as OrderHistoryRow[];
+function ordersEmbed(list: OrderHistoryRow[], total: number, safePage: number, maxPage: number, query: string) {
   if (!list.length) {
     return {
       embeds: [{ title: '📦 Order history', description: query ? `No orders matching "${query}".` : 'No orders yet.', color: 0x7c5cff }],
@@ -287,7 +275,7 @@ export async function buildOrdersMessage(db: D1Database, query: string, page: nu
       title: '📦 Order history',
       description: `Total: ${total} orders · Page ${safePage + 1} of ${maxPage + 1}${query ? ` · matching "${query}"` : ''}.`,
       fields: list.map((o) => ({
-        name: `${orderStatusEmoji(o.status)} ${o.id}`,
+        name: `${orderStatusEmoji(o.status)} ${formatOrderRef(o.id, o.order_number)}`,
         value: `${o.email}\n${o.service_name} × ${o.quantity} · Paid ${inr(o.charge)} · ${o.status} · ${istShort(o.created_at)}`,
         inline: false,
       })),
@@ -297,10 +285,57 @@ export async function buildOrdersMessage(db: D1Database, query: string, page: nu
   };
 }
 
+export async function buildOrdersMessage(db: D1Database, query: string, page: number) {
+  const q = query.trim();
+  const ampMatch = q.match(/^AMP-(\d+)$/i);
+  if (ampMatch) {
+    // A customer quoting "AMP-1003": match the friendly number directly.
+    const n = Number(ampMatch[1]);
+    try {
+      const totalRow = await db.prepare(
+        'SELECT COUNT(*) AS n FROM orders WHERE order_number = ?',
+      ).bind(n).first<{ n: number }>();
+      const total = Number(totalRow?.n ?? 0);
+      const maxPage = Math.max(0, Math.ceil(total / HISTORY_PAGE_SIZE) - 1);
+      const safePage = Math.min(Math.max(0, page), maxPage);
+      const rows = await db.prepare(
+        `SELECT o.*, u.email AS email FROM orders o JOIN users u ON u.id = o.user_id
+         WHERE o.order_number = ? ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
+      ).bind(n, HISTORY_PAGE_SIZE, safePage * HISTORY_PAGE_SIZE).all();
+      const list = (rows.results ?? []) as unknown as OrderHistoryRow[];
+      return ordersEmbed(list, total, safePage, maxPage, q);
+    } catch (err) {
+      if (err instanceof Error && /no such column/i.test(err.message)) {
+        return {
+          embeds: [{ title: '📦 Order history', description: 'Order numbers need migration 0007 — paste it into the D1 console first.', color: 0x7c5cff }],
+          components: [],
+        };
+      }
+      throw err;
+    }
+  }
+  const like = `%${q}%`;
+  const totalRow = await db.prepare(
+    'SELECT COUNT(*) AS n FROM orders o JOIN users u ON u.id = o.user_id WHERE u.email LIKE ?',
+  ).bind(like).first<{ n: number }>();
+  const total = Number(totalRow?.n ?? 0);
+  const maxPage = Math.max(0, Math.ceil(total / HISTORY_PAGE_SIZE) - 1);
+  const safePage = Math.min(Math.max(0, page), maxPage);
+  // SELECT o.* so the row carries order_number when migration 0007 is
+  // pasted, and the command still works before that (field just undefined).
+  const rows = await db.prepare(
+    `SELECT o.*, u.email AS email FROM orders o JOIN users u ON u.id = o.user_id
+     WHERE u.email LIKE ? ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
+  ).bind(like, HISTORY_PAGE_SIZE, safePage * HISTORY_PAGE_SIZE).all();
+  const list = (rows.results ?? []) as unknown as OrderHistoryRow[];
+  return ordersEmbed(list, total, safePage, maxPage, q);
+}
+
 interface RefillHistoryRow {
   id: string;
   provider_refill_id: string | null;
   order_id: string;
+  order_number: number | null;
   email: string;
   charge: number;
   status: string;
@@ -319,11 +354,23 @@ export async function buildRefillsMessage(db: D1Database, query: string, page: n
     const total = Number(totalRow?.n ?? 0);
     const maxPage = Math.max(0, Math.ceil(total / HISTORY_PAGE_SIZE) - 1);
     const safePage = Math.min(Math.max(0, page), maxPage);
-    const rows = await db.prepare(
-      `SELECT r.id, r.provider_refill_id, r.order_id, u.email AS email, o.charge, r.status, r.created_at
-       FROM refill_requests r JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id
-       WHERE u.email LIKE ? ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
-    ).bind(like, HISTORY_PAGE_SIZE, safePage * HISTORY_PAGE_SIZE).all();
+    // Prefer the friendly order number (migration 0007); fall back to the
+    // ord_ ID query when 0007 is not pasted yet.
+    let rows;
+    try {
+      rows = await db.prepare(
+        `SELECT r.id, r.provider_refill_id, r.order_id, o.order_number, u.email AS email, o.charge, r.status, r.created_at
+         FROM refill_requests r JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id
+         WHERE u.email LIKE ? ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+      ).bind(like, HISTORY_PAGE_SIZE, safePage * HISTORY_PAGE_SIZE).all();
+    } catch (err) {
+      if (!(err instanceof Error && /no such column/i.test(err.message))) throw err;
+      rows = await db.prepare(
+        `SELECT r.id, r.provider_refill_id, r.order_id, u.email AS email, o.charge, r.status, r.created_at
+         FROM refill_requests r JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id
+         WHERE u.email LIKE ? ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+      ).bind(like, HISTORY_PAGE_SIZE, safePage * HISTORY_PAGE_SIZE).all();
+    }
     const list = (rows.results ?? []) as unknown as RefillHistoryRow[];
     if (!list.length) {
       return {
@@ -338,7 +385,7 @@ export async function buildRefillsMessage(db: D1Database, query: string, page: n
         fields: list.map((r) => {
           const displayId = r.provider_refill_id || r.id;
           const lines = [
-            `Order ${r.order_id} · ${r.email}`,
+            `Order ${formatOrderRef(r.order_id, r.order_number)} · ${r.email}`,
             `Order paid ${inr(r.charge)} · ${r.status} · ${istShort(r.created_at)}`,
           ];
           if (r.provider_refill_id) lines.push(`Record ${r.id}`);

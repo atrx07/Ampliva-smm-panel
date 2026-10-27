@@ -99,6 +99,8 @@ export interface UserRow {
 
 export interface OrderRow {
   id: string;
+  /** Friendly display number (migration 0007); NULL before the migration is pasted. */
+  order_number: number | null;
   user_id: string;
   service_id: string;
   service_name: string;

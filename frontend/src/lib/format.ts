@@ -27,4 +27,9 @@ export function formatDate(iso: string) {
   return new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/** Customer-facing order reference: "AMP-1003" once migration 0007 has given the order a number, else the ord_ ID. */
+export function formatOrderRef(id: string, orderNumber?: number | null) {
+  return orderNumber ? `AMP-${orderNumber}` : id;
+}
+
 type View = 'shop' | 'dashboard' | 'admin';

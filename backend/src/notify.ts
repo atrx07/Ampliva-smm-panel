@@ -28,6 +28,15 @@ function truncate(text: string, max: number): string {
 }
 
 /**
+ * What a customer quotes: "AMP-1003" once migration 0007 has given the
+ * order a number, otherwise the ord_ ID (pre-migration orders, or the
+ * window before 0007 is pasted). The ord_ ID stays the internal key.
+ */
+export function formatOrderRef(orderId: string, orderNumber?: number | null): string {
+  return orderNumber ? `AMP-${orderNumber}` : orderId;
+}
+
+/**
  * Fresh-order alert, fired via waitUntil right after the order is recorded
  * (provider already accepted, customer already debited). `extras` are the
  * type-specific inputs from the order request — comments/usernames/groups
@@ -36,7 +45,7 @@ function truncate(text: string, max: number): string {
 export async function notifyOrderPlaced(
   env: Env,
   order: {
-    email: string; serviceName: string; orderId: string; providerOrderId: string;
+    email: string; serviceName: string; orderId: string; orderNumber?: number | null; providerOrderId: string;
     link: string; quantity: number; charge: number; balanceAfter: number;
     extras: Record<string, string>;
   },
@@ -44,7 +53,7 @@ export async function notifyOrderPlaced(
   const lines = [
     `**${order.email}**`,
     `Service: ${order.serviceName}`,
-    `Order ID: \`${order.orderId}\``,
+    `Order ID: \`${formatOrderRef(order.orderId, order.orderNumber)}\``,
     `Provider order: \`${order.providerOrderId}\``,
     `Count: ${order.quantity}`,
     `Charge: ₹${order.charge.toFixed(2)}`,
@@ -70,14 +79,14 @@ export async function notifyOrderPlaced(
 export async function notifyRefillSubmitted(
   env: Env,
   refill: {
-    email: string; serviceName: string; orderId: string; providerOrderId: string;
+    email: string; serviceName: string; orderId: string; orderNumber?: number | null; providerOrderId: string;
     refillId: string; refillRowId: string; link: string; quantity: number;
   },
 ): Promise<void> {
   await notifyDiscord(env, '🔁 Refill submitted', [
     `**${refill.email}**`,
     `Service: ${refill.serviceName}`,
-    `Order ID: \`${refill.orderId}\``,
+    `Order ID: \`${formatOrderRef(refill.orderId, refill.orderNumber)}\``,
     `Refill ID: \`${refill.refillId || '—'}\``,
     `Refill record: \`${refill.refillRowId}\``,
     `Provider order: \`${refill.providerOrderId}\``,

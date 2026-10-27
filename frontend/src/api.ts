@@ -95,7 +95,7 @@ export function createRazorpayOrder(amount: number): Promise<{ keyId: string; or
   return api('/api/payments/razorpay/order', { method: 'POST', body: JSON.stringify({ amount }) });
 }
 
-export function createOrder(serviceId: string, link: string, quantity: number, extras: Record<string, string> = {}): Promise<{ orderId: string; charge: number; balance: number; status: string }> {
+export function createOrder(serviceId: string, link: string, quantity: number, extras: Record<string, string> = {}): Promise<{ orderId: string; orderNumber: number | null; charge: number; balance: number; status: string }> {
   return api('/api/orders', { method: 'POST', body: JSON.stringify({ serviceId, link, quantity, ...extras }) });
 }
 

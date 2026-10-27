@@ -897,6 +897,21 @@ app.post('/api/orders', async (c) => {
       throw err;
     }
   }
+  // Friendly order number (migration 0007): sequential from 1001, so a
+  // customer can quote "AMP-1003" instead of the ord_ ID. Assigned here,
+  // not in the INSERT, so a pre-migration database (0007 not pasted yet)
+  // still takes orders — they just keep a NULL number until the backfill
+  // runs. MAX+1 is fine at this volume (single-digit orders/day).
+  let orderNumber: number | null = null;
+  try {
+    await db.prepare(
+      `UPDATE orders SET order_number = (SELECT COALESCE(MAX(order_number), 1000) + 1 FROM orders) WHERE id = ? AND order_number IS NULL`,
+    ).bind(orderId).run();
+    const numRow = await db.prepare(`SELECT order_number FROM orders WHERE id = ?`).bind(orderId).first<{ order_number: number | null }>();
+    orderNumber = numRow?.order_number ?? null;
+  } catch (err) {
+    if (!(err instanceof Error && /no such column/i.test(err.message))) throw err;
+  }
   const newBalance = await appendLedger(db, {
     userId: user.id,
     type: 'order_debit',
@@ -909,11 +924,11 @@ app.post('/api/orders', async (c) => {
   // Real-time owner ping on the webhook (#ampliva-alerts). Fire-and-forget:
   // a Discord failure must never slow down or break the order response.
   c.executionCtx.waitUntil(notifyOrderPlaced(c.env, {
-    email: user.email, serviceName: publicService.name, orderId, providerOrderId,
+    email: user.email, serviceName: publicService.name, orderId, orderNumber, providerOrderId,
     link, quantity, charge, balanceAfter: newBalance, extras,
   }));
 
-  return c.json({ orderId, providerOrderId, charge, balance: newBalance, status: 'Pending' }, 201);
+  return c.json({ orderId, orderNumber, providerOrderId, charge, balance: newBalance, status: 'Pending' }, 201);
 });
 
 app.get('/api/orders', async (c) => {
@@ -994,6 +1009,7 @@ app.post('/api/orders/:id/refill', async (c) => {
     // a failed refill (that row just stays 'failed' in history).
     c.executionCtx.waitUntil(notifyRefillSubmitted(c.env, {
       email: user.email, serviceName: order.service_name, orderId: order.id,
+      orderNumber: order.order_number ?? null,
       providerOrderId: order.provider_order_id ?? '', refillId: refillId || '',
       refillRowId, link: order.link, quantity: order.quantity,
     }));

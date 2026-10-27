@@ -68,6 +68,8 @@ export interface PaymentRequest {
 
 export interface Order {
   id: string;
+  /** Friendly display number (migration 0007); null before the migration is pasted. */
+  order_number?: number | null;
   user_id: string;
   user_email?: string;
   service_id: string;

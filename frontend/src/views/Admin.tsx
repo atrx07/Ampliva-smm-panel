@@ -10,7 +10,7 @@ import {
   adminTopups as fetchAdminTopups,
   adminUpdateService,
 } from '../api';
-import { formatDate, formatMoney, formatNumber } from '../lib/format';
+import { formatDate, formatMoney, formatNumber, formatOrderRef } from '../lib/format';
 import type { AdminService, AdminStats, Order, PaymentRequest } from '../types';
 
 export function Admin({ currency }: { currency: string }) {
@@ -179,10 +179,11 @@ export function Admin({ currency }: { currency: string }) {
         {!orders.length && <p className="modal-sub">No orders yet.</p>}
         <div className="table-wrap">
           <table>
-            <thead><tr><th>When</th><th>Customer</th><th>Service</th><th>Qty</th><th>Charge</th><th>Cost</th><th>Status</th><th>Inputs</th></tr></thead>
+            <thead><tr><th>Order</th><th>When</th><th>Customer</th><th>Service</th><th>Qty</th><th>Charge</th><th>Cost</th><th>Status</th><th>Inputs</th></tr></thead>
             <tbody>
               {orders.map((o) => (
                 <tr key={o.id}>
+                  <td>{formatOrderRef(o.id, o.order_number)}</td>
                   <td>{formatDate(o.created_at)}</td>
                   <td>{o.user_email || o.user_id}</td>
                   <td>{o.service_name}</td>
