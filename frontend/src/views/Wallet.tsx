@@ -130,8 +130,14 @@ export function Wallet({ currency, config, onBalanceChange }: {
         <article className="panel">
           <h3>Wallet balance</h3>
           <div className="big-balance">{wallet ? formatMoney(wallet.balance, currency) : '…'}</div>
-          {(config?.manualTopupsEnabled || config?.razorpayEnabled) && (
-            <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
+          {/* Amount field lives in the manual UPI flow (styled like the UTR
+              field) so it sits next to the QR and button it controls. When
+              manual top-ups are off but instant pay is on, it renders here
+              instead so the instant button still has an amount to charge. */}
+          {!config?.manualTopupsEnabled && config?.razorpayEnabled && (
+            <div className="form-stack">
+              <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
+            </div>
           )}
           {RAZORPAY_PARKED ? (
             <div className="instant-pay-box">
@@ -154,6 +160,9 @@ export function Wallet({ currency, config, onBalanceChange }: {
                 <li><strong>Copy the UTR</strong> from the payment receipt (12-digit reference).</li>
                 <li><strong>Submit it below</strong> — your balance lands after a quick verification.</li>
               </ol>
+              <div className="form-stack">
+                <label>Amount (₹)<input type="number" inputMode="numeric" min={10} max={100000} required value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="100" /></label>
+              </div>
               <div className="upi-pay-box">
                 <div className="upi-qr"><QRCodeSVG value={upiLink} size={140} /></div>
                 <div className="upi-pay-side">
@@ -161,7 +170,7 @@ export function Wallet({ currency, config, onBalanceChange }: {
                   <strong>{config.upiId}</strong>
                   <button type="button" className="ghost-button" onClick={copyUpiId}>{copied ? 'Copied ✓' : 'Copy UPI ID'}</button>
                   <a className="primary-button" href={upiLink}>Pay {amount >= 10 ? formatMoney(amount, currency) : ''} with UPI app</a>
-                  <span className="muted">The QR and button follow the amount above.</span>
+                  <span className="muted">The QR and button follow the amount you enter above.</span>
                 </div>
               </div>
               <form onSubmit={submitTopup} className="form-stack">
