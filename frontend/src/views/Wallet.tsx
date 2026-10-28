@@ -36,7 +36,7 @@ export function Wallet({ currency, config, onBalanceChange }: {
   const [copied, setCopied] = useState(false);
 
   const upiLink = config?.upiId
-    ? `upi://pay?pa=${encodeURIComponent(config.upiId)}&pn=Ampliva&cu=INR${amount >= 10 ? `&am=${amount}` : ''}`
+    ? `upi://pay?pa=${encodeURIComponent(config.upiId)}&pn=${encodeURIComponent('Arppith Andrews')}&cu=INR&tn=${encodeURIComponent('Ampliva wallet top-up')}${amount >= 10 ? `&am=${amount}` : ''}`
     : '';
 
   async function copyUpiId() {
@@ -180,7 +180,7 @@ export function Wallet({ currency, config, onBalanceChange }: {
                   <strong>{config.upiId}</strong>
                   <button type="button" className="ghost-button" onClick={copyUpiId}>{copied ? 'Copied ✓' : 'Copy UPI ID'}</button>
                   <a className="primary-button" href={upiLink}>Pay {amount >= 10 ? formatMoney(amount, currency) : ''} with UPI app</a>
-                  <span className="muted">The QR and button follow the amount you enter above.</span>
+                  <span className="muted">The QR and button follow the amount you enter above. If your UPI app fails from the button, scan the QR or pay the UPI ID manually — same destination.</span>
                 </div>
               </div>
               <form onSubmit={submitTopup} className="form-stack">
