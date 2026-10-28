@@ -5,7 +5,7 @@ import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord, notifyOrderPlaced, notifyRefillSubmitted } from './notify';
-import { buildInspectMessage, buildOrdersMessage, buildPendingMessage, buildRefillsMessage, buildUsersMessage, notifyTopupRequest, registerDiscordCommands, verifyDiscordSignature } from './discord';
+import { buildInspectMessage, buildOrdersMessage, buildPendingMessage, buildRefillsMessage, buildStatsMessage, buildUserDossier, buildUsersMessage, findOrder, notifyTopupRequest, orderEmbed, registerDiscordCommands, verifyDiscordSignature } from './discord';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
 import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
 
@@ -749,20 +749,24 @@ async function refreshOrderStatus(env: Env, order: OrderRow): Promise<OrderRow> 
     const now = new Date().toISOString();
 
     // Auto-refund the undelivered portion when the provider cancels.
+    // Incremental: a manual partial refund may already cover part of it,
+    // so only the not-yet-refunded share is sent — never double-refunding.
+    // The common case is unchanged (refund_amount starts at 0).
     let refundAmount = order.refund_amount;
-    if (nextStatus === 'Canceled' && order.refund_amount === 0) {
+    if (nextStatus === 'Canceled') {
       const undelivered = remains !== null && remains !== undefined && Number.isFinite(remains) ? remains : order.quantity;
-      const refund = round2((order.charge * undelivered) / order.quantity);
-      if (refund > 0) {
+      const target = round2((order.charge * undelivered) / order.quantity);
+      const delta = round2(target - order.refund_amount);
+      if (delta > 0) {
         await appendLedger(env.DB, {
           userId: order.user_id,
           type: 'refund',
-          amount: refund,
+          amount: delta,
           refType: 'order',
           refId: order.id,
           note: `Refund for canceled order (${undelivered}/${order.quantity} undelivered)`,
         });
-        refundAmount = refund;
+        refundAmount = round2(order.refund_amount + delta);
       }
     }
 
@@ -1250,6 +1254,74 @@ app.post('/api/discord/interactions', async (c) => {
       const msg = await buildInspectMessage(db, String(options.id ?? ''));
       return c.json({ type: 4, data: { ...msg, flags: 64 } });
     }
+    if (name === 'stats') {
+      const msg = await buildStatsMessage(db, c.env);
+      return c.json({ type: 4, data: { ...msg, flags: 64 } });
+    }
+    if (name === 'user') {
+      const msg = await buildUserDossier(db, String(options.user ?? ''));
+      return c.json({ type: 4, data: { ...msg, flags: 64 } });
+    }
+    if (name === 'recheck') {
+      const input = String(options.id ?? '');
+      const order = await findOrder(db, input);
+      if (!order) {
+        const msg = await buildInspectMessage(db, input);
+        return c.json({ type: 4, data: { ...msg, flags: 64 } });
+      }
+      const beforeStatus = order.status;
+      const beforeRefund = order.refund_amount;
+      const updated = await refreshOrderStatus(c.env, order);
+      const fresh = await findOrder(db, order.id);
+      const shown = fresh ?? { ...order, status: updated.status, remains: updated.remains, start_count: updated.start_count, refund_amount: updated.refund_amount };
+      const msg = await orderEmbed(db, shown);
+      const notes: string[] = [];
+      if (shown.status !== beforeStatus) notes.push(`status ${beforeStatus} → ${shown.status}`);
+      if (shown.refund_amount > beforeRefund) notes.push(`refund ₹${(shown.refund_amount - beforeRefund).toFixed(2)} fired`);
+      const head = msg.embeds[0];
+      if (head) head.description = `${head.description ?? ''}\n\n↻ Live recheck: ${notes.length ? notes.join(' · ') : `no change (still ${shown.status})`}.`;
+      return c.json({ type: 4, data: { ...msg, flags: 64 } });
+    }
+    if (name === 'refund') {
+      const input = String(options.order ?? '').trim();
+      const amountRaw = Number(options.amount);
+      const reason = String(options.reason ?? '').trim() || 'Refund via Discord';
+      const order = await findOrder(db, input);
+      if (!order) return ephemeral(`No order matches "${input}". Find it with /inspect first.`);
+      if (!Number.isFinite(amountRaw) || amountRaw <= 0) return ephemeral('Refund amount must be greater than zero.');
+      const amount = Math.round(amountRaw * 100) / 100;
+      const remaining = Math.round((order.charge - order.refund_amount) * 100) / 100;
+      if (amount > remaining) {
+        return ephemeral(`${order.order_number ? `AMP-${order.order_number}` : order.id} has only ₹${remaining.toFixed(2)} left to refund (paid ₹${order.charge.toFixed(2)}, already refunded ₹${order.refund_amount.toFixed(2)}).`);
+      }
+      const fields: Array<{ name: string; value: string }> = [
+        { name: 'Order', value: `${order.order_number ? `AMP-${order.order_number}` : order.id} · ${order.service_name}` },
+        { name: 'Customer', value: order.email },
+        { name: 'Paid', value: `₹${order.charge.toFixed(2)}` },
+        { name: 'Already refunded', value: `₹${order.refund_amount.toFixed(2)}` },
+        { name: 'Refund now', value: `₹${amount.toFixed(2)}` },
+        { name: 'Reason', value: reason },
+      ];
+      // Money only: this never touches the order status. But warn when the
+      // order is still open at CID — it may still deliver after the refund.
+      if (['pending', 'processing', 'in progress'].includes(order.status.toLowerCase())) {
+        fields.push({ name: 'Note', value: 'This order is still open at CID — it may still deliver after this refund.' });
+      }
+      return c.json({
+        type: 4,
+        data: {
+          flags: 64,
+          embeds: [{ title: 'Confirm refund', fields, color: 0x7c5cff }],
+          components: [{
+            type: 1,
+            components: [
+              { type: 2, style: 4, label: 'Confirm refund', custom_id: `refund:confirm:${order.id}:${amount.toFixed(2)}` },
+              { type: 2, style: 2, label: 'Cancel', custom_id: `refund:cancel:${order.id}` },
+            ],
+          }],
+        },
+      });
+    }
     if (name === 'adjust') {
       const email = String(options.user ?? '').trim();
       const amount = Number(options.amount);
@@ -1359,6 +1431,45 @@ app.post('/api/discord/interactions', async (c) => {
     });
   }
 
+  const refundMatch = /^refund:(confirm|cancel):([^:]+)(?::([\d.]+))?$/.exec(String(interaction.data?.custom_id || ''));
+  if (refundMatch) {
+    const orderId = refundMatch[2];
+    if (refundMatch[1] === 'cancel') {
+      return c.json({ type: 7, data: { embeds: [{ title: '❌ Refund cancelled', description: 'No money was moved.', color: 0xe74c3c }], components: [] } });
+    }
+    const amount = Number(refundMatch[3]);
+    const order = await db.prepare('SELECT id, order_number, service_name, user_id, charge, refund_amount FROM orders WHERE id = ?').bind(orderId).first<{ id: string; order_number: number | null; service_name: string; user_id: string; charge: number; refund_amount: number }>();
+    if (!order) return ephemeral('Order not found.');
+    // Re-check at confirm time: another refund may have landed since the
+    // command ran, and a refund must never exceed what was paid.
+    const remaining = Math.round((order.charge - order.refund_amount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount <= 0 || amount > remaining) {
+      return ephemeral(`That refund no longer fits — only ₹${remaining.toFixed(2)} is left to refund on this order.`);
+    }
+    const reasonField = interaction.message?.embeds?.[0]?.fields?.find((f) => f.name === 'Reason');
+    const reason = reasonField?.value || 'Refund via Discord';
+    const user = await db.prepare('SELECT email FROM users WHERE id = ?').bind(order.user_id).first<{ email: string }>();
+    const newBalance = await appendLedger(db, {
+      userId: order.user_id, type: 'refund', amount,
+      refType: 'order', refId: order.id,
+      note: `Manual refund: ${reason}`,
+    });
+    await db.prepare('UPDATE orders SET refund_amount = refund_amount + ?, updated_at = ? WHERE id = ?')
+      .bind(amount, new Date().toISOString(), order.id).run();
+    const ref = order.order_number ? `AMP-${order.order_number}` : order.id;
+    return c.json({
+      type: 7,
+      data: {
+        embeds: [{
+          title: '✅ Refund sent',
+          description: `${ref} · ${order.service_name}\n₹${amount.toFixed(2)} refunded to ${user?.email ?? 'customer'} → new balance ₹${newBalance.toFixed(2)}\nReason: ${reason}`,
+          color: 0x2ecc71,
+        }],
+        components: [],
+      },
+    });
+  }
+
   const match = /^topup:(approve|reject):(.+)$/.exec(String(interaction.data?.custom_id || ''));
   if (!match) return ephemeral('Unknown button.');
   const decision = match[1] === 'approve' ? 'approved' : 'rejected';
@@ -1449,10 +1560,10 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     // Gated by trigger (see wrangler.toml — keep the expressions in sync).
     // The 15-minute trigger runs only the sweep; the daily trigger runs
-    // only the top-up nag + catalogue sync. Without this gate, the
-    // 15-minute trigger would also run the full catalogue sync 96 times
-    // a day. An unknown or manual trigger gets the cheap, idempotent
-    // sweep only — never the catalogue sync.
+    // the top-up nag, the CID balance + stuck-order watches, and the
+    // catalogue sync. Without this gate, the 15-minute trigger would also
+    // run the full catalogue sync 96 times a day. An unknown or manual
+    // trigger gets the cheap, idempotent sweep only — never the sync.
     if (event.cron !== '17 3 * * *') {
       ctx.waitUntil(refreshOpenOrders(env));
       return;
@@ -1475,6 +1586,54 @@ export default {
           }
         } catch (error) {
           console.error('Stale top-up check failed:', error instanceof Error ? error.message : 'unknown');
+        }
+      })());
+    }
+    if (env.DB) {
+      // CID balance watch: one ping a day while the provider wallet sits
+      // below the ₹500 cushion, so an order never fails for an empty wallet.
+      // Daily, not per-sweep: the balance moves slowly, and a per-sweep ping
+      // would spam the channel while it stays low.
+      ctx.waitUntil((async () => {
+        try {
+          const client = cidClientFromEnv(env);
+          if (!client) return;
+          const balance = (await client.balance()).balance;
+          if (balance !== null && balance !== undefined && balance < 500) {
+            await notifyDiscord(env, '⚠️ CID balance low', `CID wallet is ₹${balance.toFixed(2)}, below the ₹500 cushion. Top up CID before orders start failing.\nCheck anytime: /stats in Discord or Admin → CID balance.`);
+          }
+        } catch (error) {
+          console.error('CID balance check failed:', error instanceof Error ? error.message : 'unknown');
+        }
+      })());
+      // Stuck-order watch: open orders created over 24h ago. Dripfeed
+      // orders are excluded — a long dripfeed is normal, not stuck.
+      ctx.waitUntil((async () => {
+        try {
+          const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const rows = await env.DB!
+            .prepare(`SELECT o.id, o.order_number, o.service_name, o.quantity, o.status, o.extras, o.created_at, u.email AS email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.status NOT IN ('Completed', 'Canceled', 'Cancelled', 'Partial', 'Refunded') AND o.created_at < ? ORDER BY o.created_at ASC LIMIT 11`)
+            .bind(cutoff)
+            .all<{ id: string; order_number: number | null; service_name: string; quantity: number; status: string; extras: string | null; created_at: string; email: string }>();
+          const stuck = (rows.results ?? []).filter((o) => {
+            try {
+              const parsed = o.extras ? (JSON.parse(o.extras) as Record<string, string>) : null;
+              return !(parsed && parsed.runs && Number(parsed.runs) > 1);
+            } catch { return true; }
+          });
+          if (stuck.length) {
+            const shown = stuck.slice(0, 10);
+            const lines = shown.map((o) => {
+              const ref = o.order_number ? `AMP-${o.order_number}` : o.id;
+              const days = Math.floor((Date.now() - new Date(o.created_at).getTime()) / 86400000);
+              return `• ${ref} · ${o.email} · ${o.service_name} × ${o.quantity} · ${o.status} · open ${days}d`;
+            }).join('\n');
+            const first = shown[0];
+            const firstRef = first.order_number ? `AMP-${first.order_number}` : first.id;
+            await notifyDiscord(env, '⏳ Stuck orders', `${stuck.length} order(s) open for over 24 hours:\n${lines}${stuck.length > 10 ? '\n…and more.' : ''}\nCheck one with /inspect ${firstRef}`);
+          }
+        } catch (error) {
+          console.error('Stuck-order check failed:', error instanceof Error ? error.message : 'unknown');
         }
       })());
     }

@@ -1,5 +1,6 @@
 import type { Env } from './types';
 import { formatOrderRef, notifyDiscord } from './notify';
+import { cidClientFromEnv } from './providers/cid';
 
 /**
  * Discord app interactions for owner approvals.
@@ -95,7 +96,7 @@ export async function notifyTopupRequest(
   );
 }
 
-// ---------- Admin slash commands (v1: /pending, /users, /adjust) ----------
+// ---------- Admin slash commands ----------
 // Commands arrive at the same interactions endpoint as button clicks, so no
 // gateway process is needed. They are registered guild-scoped (instant) by
 // POST /api/admin/discord/register-commands, which needs two more Worker
@@ -132,6 +133,29 @@ export const DISCORD_COMMANDS = [
     name: 'inspect',
     description: 'Show everything stored about one order or refill',
     options: [{ name: 'id', description: 'Order ID (ord_…), AMP number, CID provider order ID, or refill ID (ref_…)', type: 3, required: true, max_length: 100 }],
+  },
+  {
+    name: 'stats',
+    description: 'Show panel stats: users, orders, revenue, margin, CID balance',
+  },
+  {
+    name: 'user',
+    description: 'Show everything about one customer',
+    options: [{ name: 'user', description: 'User email (exact)', type: 3, required: true }],
+  },
+  {
+    name: 'recheck',
+    description: 'Refresh one order live from CID right now',
+    options: [{ name: 'id', description: 'Order ID (ord_…), AMP number, or CID provider order ID', type: 3, required: true, max_length: 100 }],
+  },
+  {
+    name: 'refund',
+    description: 'Refund an order (asks for confirmation first)',
+    options: [
+      { name: 'order', description: 'Order ID (ord_…), AMP number, or CID provider order ID', type: 3, required: true, max_length: 100 },
+      { name: 'amount', description: 'Refund amount in ₹', type: 10, required: true, min_value: 0.01, max_value: 100000 },
+      { name: 'reason', description: 'Reason recorded in the ledger', type: 3, required: false, max_length: 50 },
+    ],
   },
 ];
 
@@ -483,7 +507,7 @@ function extrasField(extras: string | null): { name: string; value: string } | n
   return { name: 'Inputs sent to CID', value: trunc(extras, 900) };
 }
 
-async function findOrder(db: D1Database, input: string): Promise<InspectOrderRow | null> {
+export async function findOrder(db: D1Database, input: string): Promise<InspectOrderRow | null> {
   const q = input.trim();
   const byNumber = async (n: number) => {
     try {
@@ -509,7 +533,7 @@ async function findOrder(db: D1Database, input: string): Promise<InspectOrderRow
   return (await byProvider(q)) ?? (await byId(q));
 }
 
-async function orderEmbed(db: D1Database, o: InspectOrderRow) {
+export async function orderEmbed(db: D1Database, o: InspectOrderRow) {
   let runs = 1;
   try {
     const parsed = o.extras ? (JSON.parse(o.extras) as Record<string, string>) : null;
@@ -617,6 +641,122 @@ export async function buildInspectMessage(db: D1Database, input: string) {
   if (order) return orderEmbed(db, order);
   const refill = await findRefill(db, 'provider', q);
   return refill ? refillEmbed(refill) : notFound;
+}
+
+// ---------- Stats: the admin dashboard as one glanceable embed ----------
+// Same aggregates as /api/admin/stats (delivered-share cost, both Cancelled
+// spellings), plus the live CID balance. Balance failures degrade to "—"
+// instead of failing the command: a CID blip must not hide the dashboard.
+
+export async function buildStatsMessage(db: D1Database, env: Env) {
+  const users = await db.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
+  const services = await db.prepare('SELECT COUNT(*) AS n FROM services WHERE is_active = 1 AND provider_active = 1').first<{ n: number }>();
+  const orders = await db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(charge), 0) AS revenue,
+     COALESCE(SUM(COALESCE(provider_cost * (charge - refund_amount) / NULLIF(charge, 0), provider_cost)), 0) AS cost,
+     COALESCE(SUM(refund_amount), 0) AS refunds,
+     COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) AS successful,
+     COALESCE(SUM(CASE WHEN status IN ('Canceled', 'Cancelled') THEN 1 ELSE 0 END), 0) AS failed,
+     COALESCE(SUM(CASE WHEN status = 'Partial' THEN 1 ELSE 0 END), 0) AS partial
+     FROM orders`,
+  ).first<{ n: number; revenue: number; cost: number; refunds: number; successful: number; failed: number; partial: number }>();
+  const pendingTopups = await db.prepare("SELECT COUNT(*) AS n FROM payment_requests WHERE status = 'pending'").first<{ n: number }>();
+  let providerBalance: number | null = null;
+  const client = cidClientFromEnv(env);
+  if (client) {
+    try { providerBalance = (await client.balance()).balance; } catch { providerBalance = null; }
+  }
+  const total = Number(orders?.n ?? 0);
+  const successful = Number(orders?.successful ?? 0);
+  const failed = Number(orders?.failed ?? 0);
+  const partial = Number(orders?.partial ?? 0);
+  const open = total - successful - failed - partial;
+  const revenue = Number(orders?.revenue ?? 0);
+  const cost = Number(orders?.cost ?? 0);
+  const refunds = Number(orders?.refunds ?? 0);
+  return {
+    embeds: [{
+      title: '📊 Panel stats',
+      fields: [
+        { name: 'Users', value: `${Number(users?.n ?? 0)}` },
+        { name: 'Active services', value: `${Number(services?.n ?? 0)}` },
+        { name: 'Orders', value: `${total} total · ${successful} completed · ${failed} canceled · ${partial} partial · ${open} open` },
+        { name: 'Revenue', value: inr(revenue) },
+        { name: 'Provider cost (delivered)', value: inr(cost) },
+        { name: 'Refunds', value: inr(refunds) },
+        { name: 'Gross margin', value: inr(revenue - cost - refunds) },
+        { name: 'CID balance', value: providerBalance === null ? '—' : inr(providerBalance) },
+        { name: 'Pending top-ups', value: `${Number(pendingTopups?.n ?? 0)}` },
+      ],
+      color: 0x7c5cff,
+    }],
+    components: [],
+  };
+}
+
+// ---------- User dossier: everything about one customer ----------
+// Exact email (case-insensitive); /users finds the address when unsure.
+
+export async function buildUserDossier(db: D1Database, email: string) {
+  const q = email.trim();
+  const user = await db.prepare('SELECT id, email, role, created_at FROM users WHERE LOWER(email) = LOWER(?)').bind(q).first<{ id: string; email: string; role: string; created_at: string }>();
+  if (!user) {
+    return {
+      embeds: [{ title: '👤 User not found', description: `No user with email ${q}. Find the exact email with /users first.`, color: 0x7c5cff }],
+      components: [],
+    };
+  }
+  const balanceRow = await db.prepare('SELECT COALESCE(SUM(amount), 0) AS balance FROM wallet_transactions WHERE user_id = ?').bind(user.id).first<{ balance: number }>();
+  const orderAgg = await db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(charge), 0) AS spent, COALESCE(SUM(refund_amount), 0) AS refunds,
+     COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) AS completed,
+     COALESCE(SUM(CASE WHEN status IN ('Canceled', 'Cancelled') THEN 1 ELSE 0 END), 0) AS failed
+     FROM orders WHERE user_id = ?`,
+  ).bind(user.id).first<{ n: number; spent: number; refunds: number; completed: number; failed: number }>();
+  const recentOrders = await db.prepare(
+    `SELECT id, order_number, service_name, quantity, charge, status, created_at FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 5`,
+  ).bind(user.id).all();
+  const orderLines = (recentOrders.results ?? []) as unknown as Array<{ id: string; order_number: number | null; service_name: string; quantity: number; charge: number; status: string; created_at: string }>;
+  const topupAgg = await db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) AS approved_total,
+     COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending
+     FROM payment_requests WHERE user_id = ?`,
+  ).bind(user.id).first<{ n: number; approved_total: number; pending: number }>();
+  const recentTopups = await db.prepare(
+    `SELECT amount, status, txn_ref, created_at FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 3`,
+  ).bind(user.id).all();
+  const topupLines = (recentTopups.results ?? []) as unknown as Array<{ amount: number; status: string; txn_ref: string; created_at: string }>;
+  let refillCount = 0;
+  try {
+    const r = await db.prepare('SELECT COUNT(*) AS n FROM refill_requests WHERE user_id = ?').bind(user.id).first<{ n: number }>();
+    refillCount = Number(r?.n ?? 0);
+  } catch { /* pre-migration: no refill table */ }
+  const spent = Number(orderAgg?.spent ?? 0);
+  const refunds = Number(orderAgg?.refunds ?? 0);
+  const fields: Array<{ name: string; value: string }> = [
+    { name: 'Balance', value: inr(Number(balanceRow?.balance ?? 0)) },
+    { name: 'Role', value: user.role },
+    { name: 'Orders', value: `${Number(orderAgg?.n ?? 0)} total · ${Number(orderAgg?.completed ?? 0)} completed · ${Number(orderAgg?.failed ?? 0)} canceled · spent net ${inr(spent - refunds)} (paid ${inr(spent)}, refunded ${inr(refunds)})` },
+    { name: 'Top-ups', value: `${Number(topupAgg?.n ?? 0)} total · ${inr(Number(topupAgg?.approved_total ?? 0))} approved · ${Number(topupAgg?.pending ?? 0)} pending` },
+    { name: 'Refills', value: `${refillCount} total` },
+    { name: 'Joined', value: istShort(user.created_at) },
+  ];
+  if (orderLines.length) {
+    fields.push({
+      name: 'Recent orders',
+      value: orderLines.map((o) => `${orderStatusEmoji(o.status)} ${formatOrderRef(o.id, o.order_number)} · ${o.service_name} × ${o.quantity} · ${inr(o.charge)} · ${o.status} · ${istShort(o.created_at)}`).join('\n'),
+    });
+  }
+  if (topupLines.length) {
+    fields.push({
+      name: 'Recent top-ups',
+      value: topupLines.map((t) => `${inr(t.amount)} · ${t.status} · UTR ${t.txn_ref} · ${istShort(t.created_at)}`).join('\n'),
+    });
+  }
+  return {
+    embeds: [{ title: `👤 ${user.email}`, fields, color: 0x7c5cff }],
+    components: [],
+  };
 }
 
 /** Paged user list with balances (one aggregate query, no per-user N+1). */
