@@ -34,6 +34,7 @@ export function Wallet({ currency, config, onBalanceChange }: {
   const [topupMsg, setTopupMsg] = useState<string | null>(null);
   const [razorpayBusy, setRazorpayBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [qrFlash, setQrFlash] = useState(false);
 
   const upiLink = config?.upiId
     ? `upi://pay?pa=${encodeURIComponent(config.upiId)}&pn=${encodeURIComponent('Arppith Andrews')}&cu=INR&tn=${encodeURIComponent('Ampliva wallet top-up')}${amount >= 10 ? `&am=${amount}` : ''}`
@@ -48,6 +49,15 @@ export function Wallet({ currency, config, onBalanceChange }: {
     } catch {
       setCopied(false);
     }
+  }
+
+  // Fallback for UPI apps that reject browser-originated intents (seen 2026-10-28:
+  // Supermoney + GPay failed the button while QR/manual worked): point at the QR
+  // that is already on screen, so a failed button tap still ends in a payment.
+  function flashQr() {
+    document.querySelector('.upi-qr')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setQrFlash(true);
+    window.setTimeout(() => setQrFlash(false), 1800);
   }
 
   const load = useCallback(async () => {
@@ -174,13 +184,14 @@ export function Wallet({ currency, config, onBalanceChange }: {
                 <span className="muted">UPI limit: ₹10 – ₹1,00,000 per top-up.</span>
               </div>
               <div className="upi-pay-box">
-                <div className="upi-qr"><QRCodeSVG value={upiLink} size={140} /></div>
+                <div className={qrFlash ? 'upi-qr flash' : 'upi-qr'}><QRCodeSVG value={upiLink} size={140} /></div>
                 <div className="upi-pay-side">
                   <span className="muted">You are paying</span>
                   <strong>{config.upiId}</strong>
                   <button type="button" className="ghost-button" onClick={copyUpiId}>{copied ? 'Copied ✓' : 'Copy UPI ID'}</button>
                   <a className="primary-button" href={upiLink}>Pay {amount >= 10 ? formatMoney(amount, currency) : ''} with UPI app</a>
-                  <span className="muted">The QR and button follow the amount you enter above. If your UPI app fails from the button, scan the QR or pay the UPI ID manually — same destination.</span>
+                  <button type="button" className="ghost-button" onClick={flashQr}>Button failing? Scan the QR instead</button>
+                  <span className="muted">The QR and button follow the amount you enter above.</span>
                 </div>
               </div>
               <form onSubmit={submitTopup} className="form-stack">
