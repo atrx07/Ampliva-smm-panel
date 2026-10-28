@@ -120,7 +120,7 @@ export function Admin({ currency }: { currency: string }) {
 
       <article className="panel wide">
         <h3>Discord bot</h3>
-        <p className="modal-sub">Registers /pending, /users, /adjust, /orders and /refills in your Discord server (guild-scoped, instant). Needs DISCORD_APP_ID and DISCORD_GUILD_ID in the Worker first.</p>
+        <p className="modal-sub">Registers /pending, /users, /adjust, /orders, /refills and /inspect in your Discord server (guild-scoped, instant). Needs DISCORD_APP_ID and DISCORD_GUILD_ID in the Worker first.</p>
         <button className="primary-button" type="button" onClick={registerDiscord}>Register bot commands</button>
       </article>
 

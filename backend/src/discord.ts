@@ -128,6 +128,11 @@ export const DISCORD_COMMANDS = [
     description: 'Browse refill history (10 per page)',
     options: [{ name: 'user', description: 'Filter by customer email', type: 3, required: false }],
   },
+  {
+    name: 'inspect',
+    description: 'Show everything stored about one order or refill',
+    options: [{ name: 'id', description: 'Order ID (ord_…), AMP number, CID provider order ID, or refill ID (ref_…)', type: 3, required: true, max_length: 100 }],
+  },
 ];
 
 export async function registerDiscordCommands(env: Env): Promise<number> {
@@ -405,6 +410,213 @@ export async function buildRefillsMessage(db: D1Database, query: string, page: n
       components: [],
     };
   }
+}
+
+// ---------- Inspect: everything stored about one order or refill ----------
+// One command for inquiries: a customer quotes an AMP number, a CIDstore
+// order id, or a refill id, and the owner needs the full record — including
+// the provider order id that ties our order to CID's dashboard. Resolution
+// order: ref_… → refill by our id; AMP-n → friendly number; ord_… → our
+// id; bare digits → friendly number, then provider order id; anything else
+// → provider order id, then our id, then provider refill id.
+
+interface InspectOrderRow {
+  id: string;
+  order_number: number | null;
+  user_id: string;
+  email: string;
+  service_id: string;
+  service_name: string;
+  provider_order_id: string | null;
+  link: string;
+  quantity: number;
+  charge: number;
+  provider_cost: number;
+  extras: string | null;
+  status: string;
+  start_count: number | null;
+  remains: number | null;
+  refund_amount: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface InspectRefillRow {
+  id: string;
+  provider_refill_id: string | null;
+  order_id: string;
+  order_number: number | null;
+  service_name: string;
+  provider_order_id: string | null;
+  order_charge: number;
+  order_status: string;
+  email: string;
+  status: string;
+  created_at: string;
+}
+
+const trunc = (s: string, n: number): string =>
+  s.length > n ? `${s.slice(0, n - 1)}…` : s;
+
+function inspectColor(status: string): number {
+  const s = status.toLowerCase();
+  if (s === 'completed') return 0x22c55e;
+  if (s === 'canceled' || s === 'cancelled') return 0xef4444;
+  return 0x7c5cff;
+}
+
+function extrasField(extras: string | null): { name: string; value: string } | null {
+  if (!extras) return null;
+  let parsed: unknown = null;
+  try { parsed = JSON.parse(extras); } catch { /* fall through to raw preview */ }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const lines = Object.entries(parsed as Record<string, string>).map(([key, value]) => {
+      const v = String(value ?? '');
+      if (v.includes('\n')) {
+        const vlines = v.split('\n').filter(Boolean);
+        return `${key}: ${vlines.length} lines, first: ${trunc(vlines[0] ?? '', 100)}`;
+      }
+      return `${key}: ${trunc(v, 200)}`;
+    });
+    return { name: 'Inputs sent to CID', value: trunc(lines.join('\n'), 900) };
+  }
+  return { name: 'Inputs sent to CID', value: trunc(extras, 900) };
+}
+
+async function findOrder(db: D1Database, input: string): Promise<InspectOrderRow | null> {
+  const q = input.trim();
+  const byNumber = async (n: number) => {
+    try {
+      return await db.prepare(
+        `SELECT o.*, u.email AS email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.order_number = ?`,
+      ).bind(n).first<InspectOrderRow>();
+    } catch (err) {
+      // Pre-0007 databases have no order_number column: no match, not a crash.
+      if (err instanceof Error && /no such column/i.test(err.message)) return null;
+      throw err;
+    }
+  };
+  const byId = (id: string) =>
+    db.prepare(`SELECT o.*, u.email AS email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = ?`).bind(id).first<InspectOrderRow>();
+  const byProvider = (pid: string) =>
+    db.prepare(`SELECT o.*, u.email AS email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.provider_order_id = ?`).bind(pid).first<InspectOrderRow>();
+  const ampMatch = q.match(/^AMP-(\d+)$/i);
+  if (ampMatch) return byNumber(Number(ampMatch[1]));
+  if (q.startsWith('ord_')) return byId(q);
+  if (/^\d+$/.test(q)) {
+    return (await byNumber(Number(q))) ?? (await byProvider(q));
+  }
+  return (await byProvider(q)) ?? (await byId(q));
+}
+
+async function orderEmbed(db: D1Database, o: InspectOrderRow) {
+  let runs = 1;
+  try {
+    const parsed = o.extras ? (JSON.parse(o.extras) as Record<string, string>) : null;
+    if (parsed && typeof parsed === 'object' && parsed.runs) runs = Number(parsed.runs) || 1;
+  } catch { /* no dripfeed info */ }
+  const fields: Array<{ name: string; value: string }> = [
+    { name: 'Customer', value: o.email },
+    { name: 'Service', value: `${o.service_name} (${o.service_id})` },
+    { name: 'Status', value: `${orderStatusEmoji(o.status)} ${o.status}${o.start_count !== null || o.remains !== null ? ` · start ${o.start_count ?? '—'} · remains ${o.remains ?? '—'}` : ''}` },
+    { name: 'Provider order ID (CID)', value: o.provider_order_id ? `${o.provider_order_id} · paste this ID into CIDstore to cross-check` : 'Not recorded' },
+    { name: 'Link', value: trunc(o.link, 500) },
+    { name: 'Quantity', value: runs > 1 ? `${o.quantity} × ${runs} runs = ${o.quantity * runs} total` : `${o.quantity}` },
+    { name: 'Money', value: `Paid ${inr(o.charge)} · Provider cost ${inr(o.provider_cost)}${o.refund_amount > 0 ? ` · Refund ${inr(o.refund_amount)}` : ''}` },
+    { name: 'Placed', value: `${istShort(o.created_at)} · updated ${istShort(o.updated_at)}` },
+  ];
+  const inputs = extrasField(o.extras);
+  if (inputs) fields.push(inputs);
+  const txs = await db.prepare(
+    `SELECT type, amount, balance_after, created_at FROM wallet_transactions
+     WHERE ref_type = 'order' AND ref_id = ? ORDER BY created_at ASC LIMIT 10`,
+  ).bind(o.id).all();
+  const txList = (txs.results ?? []) as unknown as Array<{ type: string; amount: number; balance_after: number; created_at: string }>;
+  if (txList.length) {
+    fields.push({
+      name: 'Wallet',
+      value: txList.map((t) => `${t.type} ${inr(t.amount)} → balance ${inr(t.balance_after)} · ${istShort(t.created_at)}`).join('\n'),
+    });
+  }
+  try {
+    const totalRow = await db.prepare(`SELECT COUNT(*) AS n FROM refill_requests WHERE order_id = ?`).bind(o.id).first<{ n: number }>();
+    const total = Number(totalRow?.n ?? 0);
+    if (total > 0) {
+      const rr = await db.prepare(
+        `SELECT id, provider_refill_id, status, created_at FROM refill_requests WHERE order_id = ? ORDER BY created_at DESC LIMIT 5`,
+      ).bind(o.id).all();
+      const rlist = (rr.results ?? []) as unknown as Array<{ id: string; provider_refill_id: string | null; status: string; created_at: string }>;
+      fields.push({
+        name: `Refills (${total})`,
+        value: rlist.map((r) => `${refillStatusEmoji(r.status)} ${r.id}${r.provider_refill_id ? ` (provider ${r.provider_refill_id})` : ''} · ${r.status} · ${istShort(r.created_at)}`).join('\n'),
+      });
+    }
+  } catch { /* pre-migration: no refill table */ }
+  return {
+    embeds: [{
+      title: `🔍 ${formatOrderRef(o.id, o.order_number)}`,
+      description: `Internal ID: ${o.id}`,
+      fields,
+      color: inspectColor(o.status),
+    }],
+    components: [],
+  };
+}
+
+function refillEmbed(r: InspectRefillRow) {
+  return {
+    embeds: [{
+      title: `🔍 Refill ${r.id}`,
+      fields: [
+        { name: 'Order', value: `${formatOrderRef(r.order_id, r.order_number)} · ${r.service_name}` },
+        { name: 'Customer', value: r.email },
+        { name: 'Order status', value: `${orderStatusEmoji(r.order_status)} ${r.order_status} · paid ${inr(r.order_charge)}` },
+        { name: 'Provider order ID (CID)', value: r.provider_order_id ? `${r.provider_order_id} · paste this ID into CIDstore to cross-check` : 'Not recorded' },
+        { name: 'Refill status', value: `${refillStatusEmoji(r.status)} ${r.status}` },
+        { name: 'Provider refill ID', value: r.provider_refill_id ?? 'Not returned yet' },
+        { name: 'Requested', value: istShort(r.created_at) },
+      ],
+      color: 0x7c5cff,
+    }],
+    components: [],
+  };
+}
+
+async function findRefill(db: D1Database, by: 'id' | 'provider', value: string): Promise<InspectRefillRow | null> {
+  try {
+    const col = by === 'id' ? 'r.id' : 'r.provider_refill_id';
+    return await db.prepare(
+      `SELECT r.id, r.provider_refill_id, r.order_id, o.order_number, o.service_name, o.provider_order_id,
+       o.charge AS order_charge, o.status AS order_status, u.email AS email, r.status, r.created_at
+       FROM refill_requests r JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id
+       WHERE ${col} = ?`,
+    ).bind(value).first<InspectRefillRow>();
+  } catch {
+    // Pre-migration: no refill table — no match, not a crash.
+    return null;
+  }
+}
+
+export async function buildInspectMessage(db: D1Database, input: string) {
+  const q = input.trim();
+  if (!q) {
+    return {
+      embeds: [{ title: '🔍 Inspect', description: 'Give an ID: an ord_… ID, an AMP number (AMP-1003), a CID provider order ID, or a ref_… ID.', color: 0x7c5cff }],
+      components: [],
+    };
+  }
+  const notFound = {
+    embeds: [{ title: '🔍 Not found', description: `No order or refill matches "${trunc(q, 100)}". Try an ord_… ID, an AMP number (AMP-1003), a CID provider order ID, or a ref_… ID.`, color: 0x7c5cff }],
+    components: [],
+  };
+  if (q.startsWith('ref_')) {
+    const r = await findRefill(db, 'id', q);
+    return r ? refillEmbed(r) : notFound;
+  }
+  const order = await findOrder(db, q);
+  if (order) return orderEmbed(db, order);
+  const refill = await findRefill(db, 'provider', q);
+  return refill ? refillEmbed(refill) : notFound;
 }
 
 /** Paged user list with balances (one aggregate query, no per-user N+1). */

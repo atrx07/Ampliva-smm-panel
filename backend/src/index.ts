@@ -5,7 +5,7 @@ import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord, notifyOrderPlaced, notifyRefillSubmitted } from './notify';
-import { buildOrdersMessage, buildPendingMessage, buildRefillsMessage, buildUsersMessage, notifyTopupRequest, registerDiscordCommands, verifyDiscordSignature } from './discord';
+import { buildInspectMessage, buildOrdersMessage, buildPendingMessage, buildRefillsMessage, buildUsersMessage, notifyTopupRequest, registerDiscordCommands, verifyDiscordSignature } from './discord';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
 import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
 
@@ -1244,6 +1244,10 @@ app.post('/api/discord/interactions', async (c) => {
     }
     if (name === 'refills') {
       const msg = await buildRefillsMessage(db, String(options.user ?? ''), 0);
+      return c.json({ type: 4, data: { ...msg, flags: 64 } });
+    }
+    if (name === 'inspect') {
+      const msg = await buildInspectMessage(db, String(options.id ?? ''));
       return c.json({ type: 4, data: { ...msg, flags: 64 } });
     }
     if (name === 'adjust') {
