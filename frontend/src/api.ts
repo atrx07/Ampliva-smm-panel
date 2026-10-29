@@ -1,4 +1,5 @@
 import type {
+  ActivityResponse,
   AdminService,
   AdminStats,
   AuthResponse,
@@ -40,6 +41,10 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export function getServices(): Promise<ServicesResponse> {
   return api<ServicesResponse>('/api/services');
+}
+
+export function getActivity(): Promise<ActivityResponse> {
+  return api<ActivityResponse>('/api/activity');
 }
 
 export interface LookupStart {

@@ -1,3 +1,5 @@
+import { ActivityTicker } from '../components/ActivityTicker';
+
 export function Landing({ serviceCount, orderingEnabled, onExplore }: {
   serviceCount: number;
   orderingEnabled: boolean;
@@ -24,6 +26,8 @@ export function Landing({ serviceCount, orderingEnabled, onExplore }: {
           <article><strong>24/7</strong><span>store access</span></article>
         </div>
       </section>
+
+      <ActivityTicker />
 
       <section className="how-section" id="how">
         <div className="section-heading">

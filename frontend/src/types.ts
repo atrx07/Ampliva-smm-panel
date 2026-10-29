@@ -98,6 +98,18 @@ export interface WalletResponse {
   topups: PaymentRequest[];
 }
 
+/** Public, anonymized recent-order activity for the storefront ticker. */
+export interface ActivityItem {
+  service: string;
+  quantity: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface ActivityResponse {
+  activity: ActivityItem[];
+}
+
 /** Instagram Tools: profile lookup result (surface data only). */
 export interface LookupPost {
   shortcode: string;

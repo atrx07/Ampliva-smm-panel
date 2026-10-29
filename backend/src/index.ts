@@ -49,6 +49,29 @@ app.get('/api/config', (c) => {
   });
 });
 
+// Public, anonymized: the storefront's "recent activity" ticker. Only the
+// service snapshot, quantity, status and timestamp leave the server — never
+// a user id, email, link, order id or charge, so the ticker is safe to show
+// to logged-out visitors.
+app.get('/api/activity', async (c) => {
+  if (!c.env.DB) return c.json({ activity: [] });
+  try {
+    const rows = await c.env.DB.prepare(
+      'SELECT service_name, quantity, status, created_at FROM orders ORDER BY created_at DESC LIMIT 10'
+    ).all<{ service_name: string; quantity: number; status: string; created_at: string }>();
+    const activity = (rows.results ?? []).map((r) => ({
+      service: r.service_name,
+      quantity: r.quantity,
+      status: r.status,
+      createdAt: r.created_at,
+    }));
+    return c.json({ activity });
+  } catch (error) {
+    console.error('Activity read failed:', error instanceof Error ? error.message : 'unknown');
+    return c.json({ activity: [] });
+  }
+});
+
 app.get('/api/services', async (c) => {
   const currency = c.env.CID_CURRENCY || 'INR';
   const updatedAt = new Date().toISOString();
