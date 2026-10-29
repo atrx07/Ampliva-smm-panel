@@ -99,8 +99,20 @@ nav a:hover { color: white; }
 .steps article > span { color: #8172c7; font-size: .76rem; font-weight: 800; letter-spacing: .12em; }
 .steps h3 { font-size: 1.35rem; margin: 48px 0 8px; }
 .steps p { color: var(--muted); margin: 0; line-height: 1.6; font-size: .9rem; }
-.activity-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.activity-list li { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.025); display: flex; flex-direction: column; gap: 4px; }
+.activity-banner { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.activity-banner-label { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.activity-live-dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; animation: activity-pulse 2s ease-in-out infinite; }
+@keyframes activity-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.activity-marquee { overflow: hidden; flex: 1; min-width: 0; -webkit-mask-image: linear-gradient(to right, transparent, black 4%, black 96%, transparent); mask-image: linear-gradient(to right, transparent, black 4%, black 96%, transparent); }
+.activity-track { display: flex; width: max-content; animation: activity-scroll 45s linear infinite; }
+.activity-marquee:hover .activity-track { animation-play-state: paused; }
+@keyframes activity-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.activity-entry { white-space: nowrap; margin-right: 3.5rem; }
+@media (prefers-reduced-motion: reduce) {
+  .activity-track { animation: none; }
+  .activity-live-dot { animation: none; }
+  .activity-marquee { overflow-x: auto; }
+}
 footer { padding: 34px 0 50px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 30px; }
 footer p { color: #666d7b; max-width: 600px; text-align: right; line-height: 1.5; font-size: .76rem; }
 

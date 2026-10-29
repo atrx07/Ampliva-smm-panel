@@ -14,10 +14,21 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-// Storefront social proof: recent orders, anonymized by the API (service,
-// quantity, status, time only — no users, links or order ids). Refreshes
-// every minute so the section stays live. Any failure hides the section
-// instead of breaking the landing page.
+// Provider names bury the point in marketing detail after a '·' separator
+// ("Instagram Views Max Unlimited · All Links · ..."); the banner shows
+// only the first segment, which matches the store listing and keeps each
+// entry short enough to read while it rolls past.
+function bannerService(name: string): string {
+  return name.split(/[·|]/)[0].trim() || name;
+}
+
+// News-bulletin banner: one continuously rolling line, anonymized by the
+// API (service, quantity, status, time only — no users, links or order
+// ids). The track holds two copies of the entries and slides exactly one
+// copy's width, so the loop is seamless; each entry carries its own
+// trailing margin so the -50% shift lands exactly. Refreshes every minute;
+// any failure hides the banner instead of breaking the landing page.
+// Pauses on hover; reduced-motion users get a plain scrollable strip.
 export function ActivityTicker() {
   const [items, setItems] = useState<ActivityItem[] | null>(null);
 
@@ -33,22 +44,21 @@ export function ActivityTicker() {
 
   if (!items || items.length === 0) return null;
 
+  const entries = [...items, ...items];
+
   return (
-    <section className="how-section" id="activity">
-      <div className="section-heading">
-        <div>
-          <div className="eyebrow">Live activity</div>
-          <h2>Happening on Ampliva right now.</h2>
+    <section className="activity-banner" aria-label="Recent orders">
+      <span className="activity-banner-label"><span className="activity-live-dot" />Live</span>
+      <div className="activity-marquee">
+        <div className="activity-track">
+          {entries.map((item, i) => (
+            <span className="activity-entry" key={`${item.createdAt}-${i}`}>
+              <strong>{formatNumber(item.quantity)} × {bannerService(item.service)}</strong>
+              <span className="muted"> · {item.status} · {timeAgo(item.createdAt)}</span>
+            </span>
+          ))}
         </div>
       </div>
-      <ul className="activity-list">
-        {items.map((item, i) => (
-          <li key={`${item.createdAt}-${i}`}>
-            <strong>{formatNumber(item.quantity)} × {item.service}</strong>
-            <span className="muted">{item.status} · {timeAgo(item.createdAt)}</span>
-          </li>
-        ))}
-      </ul>
     </section>
   );
 }
