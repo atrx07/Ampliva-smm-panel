@@ -52,12 +52,13 @@ app.get('/api/config', (c) => {
 // Public, anonymized: the storefront's "recent activity" ticker. Only the
 // service snapshot, quantity, status and timestamp leave the server — never
 // a user id, email, link, order id or charge, so the ticker is safe to show
-// to logged-out visitors.
+// to logged-out visitors. Canceled/refunded orders are kept out: the ticker
+// is social proof, and a failed order in it would do the opposite of its job.
 app.get('/api/activity', async (c) => {
   if (!c.env.DB) return c.json({ activity: [] });
   try {
     const rows = await c.env.DB.prepare(
-      'SELECT service_name, quantity, status, created_at FROM orders ORDER BY created_at DESC LIMIT 10'
+      "SELECT service_name, quantity, status, created_at FROM orders WHERE LOWER(status) NOT IN ('canceled', 'cancelled', 'refunded') ORDER BY created_at DESC LIMIT 10"
     ).all<{ service_name: string; quantity: number; status: string; created_at: string }>();
     const activity = (rows.results ?? []).map((r) => ({
       service: r.service_name,
