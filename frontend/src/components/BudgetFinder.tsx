@@ -12,6 +12,48 @@ interface Fit {
   maxUnits: number;
 }
 
+// Same compact banner as the main store list: platform chip, short stripped
+// name (ellipsized, never mid-word clipped), and the finder count — the max
+// units this budget buys. Tapping expands to the full details + order button.
+function FinderRow({ fit, budget, currency, user, open, onToggle, onOrderClick }: {
+  fit: Fit;
+  budget: number;
+  currency: string;
+  user: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onOrderClick: (service: Service) => void;
+}) {
+  const { service, minCharge, maxUnits } = fit;
+  const short = shortService(service);
+  return (
+    <article className={`service-row${open ? ' open' : ''}`}>
+      <button type="button" className="service-row-head" onClick={onToggle} aria-expanded={open}>
+        <span className="platform-chip">{chipLabel(service)}</span>
+        <span className="row-name">{short.label}</span>
+        {short.speed && <span className="speed-chip">{short.speed}</span>}
+        <span className="row-price"><strong>up to {formatNumber(maxUnits)}</strong><span> for ₹{formatNumber(budget)}</span></span>
+        <span className="row-chevron" aria-hidden="true">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="service-row-body">
+          <h3>{service.name}</h3>
+          <p className="category">{displayCategory(service.category)}</p>
+          {service.description && <p className="service-description">{service.description}</p>}
+          {service.refill && <span className="refill-chip">Refill</span>}
+          <div className="limits">
+            <span><small>Minimum</small>{formatNumber(service.min)}</span>
+            <span><small>Maximum</small>{formatNumber(service.max)}</span>
+          </div>
+          <p className="muted">from {formatMoney(minCharge, currency)} · up to {formatNumber(maxUnits)} for ₹{formatNumber(budget)}</p>
+          <button className="service-button active-button" type="button" onClick={() => onOrderClick(service)}>
+            {user ? 'Order now' : 'Log in to order'}
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
 // "What can I get for ₹__?" — pure discovery over the already-loaded
 // catalogue, no new API. A service fits when its minimum order charge
 // (rate × minimum quantity) is within the budget; results rank by rate
@@ -27,6 +69,7 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
   const [budgetText, setBudgetText] = useState('');
   const [platform, setPlatform] = useState<Platform | 'all'>('all');
   const [category, setCategory] = useState('all');
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const budget = Math.floor(Number(budgetText) || 0);
 
   // Same discovery as the main store list: only platforms actually present,
@@ -47,6 +90,7 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
   function pickPlatform(item: Platform | 'all') {
     setPlatform(item);
     setCategory('all');
+    setOpenKey(null);
   }
 
   const scope = [platform !== 'all' ? platformLabels[platform] : null, category !== 'all' ? category : null]
@@ -84,7 +128,7 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
             inputMode="numeric"
             min={1}
             value={budgetText}
-            onChange={(event) => setBudgetText(event.target.value)}
+            onChange={(event) => { setBudgetText(event.target.value); setOpenKey(null); }}
             placeholder="50"
             aria-label="Your budget in rupees"
           />
@@ -102,7 +146,7 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
         </label>
         <label className="select-field">
           <span>Category</span>
-          <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter budget results by category">
+          <select value={category} onChange={(event) => { setCategory(event.target.value); setOpenKey(null); }} aria-label="Filter budget results by category">
             <option value="all">All categories</option>
             {categories.map((name) => (
               <option key={name} value={name}>{name}</option>
@@ -122,18 +166,20 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
             {total} service{total === 1 ? '' : 's'}{scope ? ` in ${scope}` : ''} fit in ₹{formatNumber(budget)}
             {total > fits.length ? ` — showing the best ${fits.length} first` : ' — best value first'}.
           </p>
-          <ul className="budget-results">
-            {fits.map(({ service, minCharge, maxUnits }) => (
-              <li key={service.id} className="budget-row">
-                <span className="platform-chip">{chipLabel(service)}</span>
-                <span className="budget-row-name">{shortService(service).label}</span>
-                <span className="muted">from {formatMoney(minCharge, currency)} · up to {formatNumber(maxUnits)} for ₹{formatNumber(budget)}</span>
-                <button className="ghost-button" type="button" onClick={() => onOrderClick(service)}>
-                  {user ? 'Order' : 'Log in to order'}
-                </button>
-              </li>
+          <div className="service-list">
+            {fits.map((fit) => (
+              <FinderRow
+                key={fit.service.id}
+                fit={fit}
+                budget={budget}
+                currency={currency}
+                user={user}
+                open={openKey === fit.service.id}
+                onToggle={() => setOpenKey((current) => (current === fit.service.id ? null : fit.service.id))}
+                onOrderClick={onOrderClick}
+              />
             ))}
-          </ul>
+          </div>
         </>
       )}
     </section>
