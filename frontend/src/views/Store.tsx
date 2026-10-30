@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { BudgetFinder } from '../components/BudgetFinder';
 import { displayCategory, sortCategories } from '../lib/categories';
 import { FEATURED_IDS } from '../lib/featured';
 import { formatMoney, formatNumber, platformLabels } from '../lib/format';
@@ -148,6 +149,8 @@ export function Store({ catalog, loading, error, user, currency, onOrderClick }:
             </div>
           )}
         </div>
+
+        <BudgetFinder services={services} currency={currency} user={user} loading={loading} onOrderClick={onOrderClick} />
 
         <div className="catalog-controls">
           <label className="search-field">

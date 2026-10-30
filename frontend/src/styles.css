@@ -285,6 +285,15 @@ body { overflow-x: clip; }
    popup rows to dark text on white so all dropdowns stay readable. */
 select option { color: #11131a; background-color: #ffffff; }
 .result-count { margin-left: auto; color: #757c8c; font-size: .85rem; padding-bottom: 14px; white-space: nowrap; }
+.budget-finder { margin-bottom: 28px; padding: 18px; border: 1px solid var(--line); border-radius: 17px; background: rgba(255,255,255,.025); }
+.budget-finder-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.budget-finder-head h3 { margin: 6px 0 0; font-size: 1.35rem; }
+.budget-input { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 0 12px; height: 44px; color: white; }
+.budget-input input { background: transparent; border: 0; outline: 0; color: white; font-size: 16px; width: 110px; }
+.budget-results { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.budget-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; }
+.budget-row-name { font-weight: 650; }
+.budget-row .ghost-button { margin-left: auto; }
 .featured-section { margin-bottom: 44px; }
 .featured-section h3 { margin: 0 0 6px; font-size: 1.4rem; letter-spacing: -.03em; }
 .featured-section .modal-sub { margin-bottom: 18px; }
