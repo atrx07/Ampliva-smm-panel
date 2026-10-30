@@ -288,6 +288,7 @@ select option { color: #11131a; background-color: #ffffff; }
 .budget-finder { margin-bottom: 28px; padding: 18px; border: 1px solid var(--line); border-radius: 17px; background: rgba(255,255,255,.025); }
 .budget-finder-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
 .budget-finder-head h3 { margin: 6px 0 0; font-size: 1.35rem; }
+.budget-filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .budget-input { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 0 12px; height: 44px; color: white; }
 .budget-input input { background: transparent; border: 0; outline: 0; color: white; font-size: 16px; width: 110px; }
 .budget-results { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }

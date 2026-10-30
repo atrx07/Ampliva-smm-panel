@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { formatMoney, formatNumber } from '../lib/format';
+import { displayCategory, sortCategories } from '../lib/categories';
+import { formatMoney, formatNumber, platformLabels } from '../lib/format';
 import { chipLabel, shortService } from '../lib/shortTitle';
-import type { Service } from '../types';
+import type { Platform, Service } from '../types';
 
 const MAX_RESULTS = 30;
 
@@ -24,12 +25,39 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
   onOrderClick: (service: Service) => void;
 }) {
   const [budgetText, setBudgetText] = useState('');
+  const [platform, setPlatform] = useState<Platform | 'all'>('all');
+  const [category, setCategory] = useState('all');
   const budget = Math.floor(Number(budgetText) || 0);
+
+  // Same discovery as the main store list: only platforms actually present,
+  // categories scoped to the chosen platform.
+  const availablePlatforms = useMemo(() => {
+    const discovered = new Set(services.map((service) => service.platform));
+    return (Object.keys(platformLabels) as Platform[]).filter((item) => discovered.has(item));
+  }, [services]);
+
+  const categories = useMemo(() => {
+    const names = new Set<string>();
+    for (const service of services) {
+      if (platform === 'all' || service.platform === platform) names.add(displayCategory(service.category));
+    }
+    return sortCategories([...names]);
+  }, [services, platform]);
+
+  function pickPlatform(item: Platform | 'all') {
+    setPlatform(item);
+    setCategory('all');
+  }
+
+  const scope = [platform !== 'all' ? platformLabels[platform] : null, category !== 'all' ? category : null]
+    .filter(Boolean).join(' · ');
 
   const { fits, total } = useMemo(() => {
     if (budget <= 0) return { fits: [] as Fit[], total: 0 };
     const all: Fit[] = [];
     for (const service of services) {
+      if (platform !== 'all' && service.platform !== platform) continue;
+      if (category !== 'all' && displayCategory(service.category) !== category) continue;
       const rate = service.rate;
       const minCharge = rate > 0 ? (rate * service.min) / 1000 : 0;
       if (minCharge > budget) continue;
@@ -40,7 +68,7 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
     }
     all.sort((a, b) => a.service.rate - b.service.rate);
     return { fits: all.slice(0, MAX_RESULTS), total: all.length };
-  }, [services, budget]);
+  }, [services, budget, platform, category]);
 
   return (
     <section className="budget-finder" aria-label="Budget finder">
@@ -62,16 +90,36 @@ export function BudgetFinder({ services, currency, user, loading, onOrderClick }
           />
         </label>
       </div>
+      <div className="budget-filters">
+        <label className="select-field">
+          <span>Platform</span>
+          <select value={platform} onChange={(event) => pickPlatform(event.target.value as Platform | 'all')} aria-label="Filter budget results by platform">
+            <option value="all">All platforms</option>
+            {availablePlatforms.map((item) => (
+              <option key={item} value={item}>{platformLabels[item]}</option>
+            ))}
+          </select>
+        </label>
+        <label className="select-field">
+          <span>Category</span>
+          <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter budget results by category">
+            <option value="all">All categories</option>
+            {categories.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
       {budget <= 0 ? (
         <p className="muted">Type a budget above and see every service you can afford, best value first.</p>
       ) : loading ? (
         <p className="muted">Loading services…</p>
       ) : fits.length === 0 ? (
-        <p className="muted">Nothing fits ₹{formatNumber(budget)} yet — try a slightly bigger budget.</p>
+        <p className="muted">Nothing fits ₹{formatNumber(budget)}{scope ? ` in ${scope}` : ''} yet — try a slightly bigger budget or a different filter.</p>
       ) : (
         <>
           <p className="muted">
-            {total} service{total === 1 ? '' : 's'} fit in ₹{formatNumber(budget)}
+            {total} service{total === 1 ? '' : 's'}{scope ? ` in ${scope}` : ''} fit in ₹{formatNumber(budget)}
             {total > fits.length ? ` — showing the best ${fits.length} first` : ' — best value first'}.
           </p>
           <ul className="budget-results">
