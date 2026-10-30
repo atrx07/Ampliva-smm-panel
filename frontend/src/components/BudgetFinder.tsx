@@ -28,12 +28,16 @@ function FinderRow({ fit, budget, currency, user, open, onToggle, onOrderClick }
   const short = shortService(service);
   return (
     <article className={`service-row${open ? ' open' : ''}`}>
-      <button type="button" className="service-row-head" onClick={onToggle} aria-expanded={open}>
-        <span className="platform-chip">{chipLabel(service)}</span>
-        <span className="row-name">{short.label}</span>
-        {short.speed && <span className="speed-chip">{short.speed}</span>}
-        <span className="row-price"><strong>up to {formatNumber(maxUnits)}</strong><span> for ₹{formatNumber(budget)}</span></span>
-        <span className="row-chevron" aria-hidden="true">{open ? '▴' : '▾'}</span>
+      <button type="button" className="service-row-head finder-row-head" onClick={onToggle} aria-expanded={open}>
+        <span className="finder-row-top">
+          <span className="platform-chip">{chipLabel(service)}</span>
+          <span className="row-name">{short.label}</span>
+          <span className="row-chevron" aria-hidden="true">{open ? '▴' : '▾'}</span>
+        </span>
+        <span className="finder-row-meta">
+          {short.speed && <span className="speed-chip">{short.speed}</span>}
+          <span className="row-price"><strong>up to {formatNumber(maxUnits)}</strong><span> for ₹{formatNumber(budget)}</span></span>
+        </span>
       </button>
       {open && (
         <div className="service-row-body">

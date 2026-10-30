@@ -243,6 +243,11 @@ body { overflow-x: clip; }
 @media (max-width: 580px) {
   /* Service rows: keep the banner tight on phones */
   .service-row-head { padding: 12px; gap: 8px; }
+  /* Finder rows: stack the banner so the name gets its own line */
+  .finder-row-head { flex-direction: column; align-items: stretch; gap: 6px; }
+  .finder-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .finder-row-top .row-chevron { margin-left: auto; }
+  .finder-row-meta { display: flex; align-items: center; gap: 8px; }
   .row-name { font-size: .85rem; }
   .speed-chip { font-size: .62rem; padding: 3px 7px; }
   .row-price { font-size: .85rem; }
@@ -289,6 +294,15 @@ select option { color: #11131a; background-color: #ffffff; }
 .budget-finder-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
 .budget-finder-head h3 { margin: 6px 0 0; font-size: 1.35rem; }
 .budget-filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+/* Finder banner rows: on desktop the two spans vanish (display: contents)
+   so the banner is the same single row as the main store list. On phones
+   they become real rows — line 1 chip + name + chevron, line 2 speed +
+   count — so the name gets a full line instead of shrinking to "U...". */
+.finder-row-top, .finder-row-meta { display: contents; }
+/* With display: contents the chevron is a direct flex item of the button;
+   keep it last on desktop (source order would put it mid-row). On phones
+   it sits in the top row, where margin-left: auto pushes it right. */
+.finder-row-head .row-chevron { order: 5; }
 .budget-input { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 0 12px; height: 44px; color: white; }
 .budget-input input { background: transparent; border: 0; outline: 0; color: white; font-size: 16px; width: 110px; }
 .featured-section { margin-bottom: 44px; }
