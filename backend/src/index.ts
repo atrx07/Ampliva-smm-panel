@@ -5,7 +5,7 @@ import { cidClientFromEnv } from './providers/cid';
 import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord, notifyOrderPlaced, notifyRefillSubmitted } from './notify';
-import { buildInspectMessage, buildOrdersMessage, buildPendingMessage, buildRefillsMessage, buildStatsMessage, buildUserDossier, buildUsersMessage, findOrder, notifyTopupRequest, orderEmbed, registerDiscordCommands, verifyDiscordSignature } from './discord';
+import { buildCatalogMessage, buildInspectMessage, buildOrdersMessage, buildPendingMessage, buildRefillsMessage, buildStatsMessage, buildUserDossier, buildUsersMessage, findOrder, notifyTopupRequest, orderEmbed, registerDiscordCommands, verifyDiscordSignature } from './discord';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
 import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
 
@@ -1280,6 +1280,10 @@ app.post('/api/discord/interactions', async (c) => {
     }
     if (name === 'stats') {
       const msg = await buildStatsMessage(db, c.env);
+      return c.json({ type: 4, data: { ...msg, flags: 64 } });
+    }
+    if (name === 'catalog') {
+      const msg = await buildCatalogMessage(db, String(options.query ?? ''));
       return c.json({ type: 4, data: { ...msg, flags: 64 } });
     }
     if (name === 'user') {

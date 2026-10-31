@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { cleanName } from './catalog';
 import { formatOrderRef, notifyDiscord } from './notify';
 import { cidClientFromEnv } from './providers/cid';
 
@@ -137,6 +138,11 @@ export const DISCORD_COMMANDS = [
   {
     name: 'stats',
     description: 'Show panel stats: users, orders, revenue, margin, CID balance',
+  },
+  {
+    name: 'catalog',
+    description: 'Search the live service catalogue (prices, minimums)',
+    options: [{ name: 'query', description: 'Search name, category, or platform (empty = platform summary)', type: 3, required: false, max_length: 100 }],
   },
   {
     name: 'user',
@@ -794,5 +800,80 @@ export async function buildUsersMessage(db: D1Database, query: string, page: num
       color: 0x7c5cff,
     }],
     components: buttons.length ? [{ type: 1, components: buttons }] : [],
+  };
+}
+
+// ---------- Catalogue: search the live service list from Discord ----------
+// Owner-only and read-only, like every other command here (the dispatcher
+// gates on ADMIN_DISCORD_USER_ID before any command runs). Same name rule
+// as the store (display_name override, else cleanName) and same active
+// filter, so Discord answers match what customers see in the store. Search
+// matches name, category, and platform, cheapest first; no pagination in
+// v1 — the count line says how many matched, so a narrower query pages it.
+
+const CATALOG_PAGE_SIZE = 10;
+
+interface CatalogServiceRow {
+  provider_name: string;
+  display_name: string | null;
+  category: string;
+  platform: string;
+  retail_rate: number;
+  min: number;
+  max: number;
+  refill: number;
+}
+
+export async function buildCatalogMessage(db: D1Database, query: string) {
+  const q = query.trim();
+  const active = 'is_active = 1 AND provider_active = 1 AND retail_rate > 0 AND max > 0';
+  if (!q) {
+    const rows = await db.prepare(
+      `SELECT platform, COUNT(*) AS n FROM services WHERE ${active} GROUP BY platform ORDER BY n DESC`,
+    ).all();
+    const list = (rows.results ?? []) as Array<{ platform: string; n: number }>;
+    if (!list.length) {
+      return {
+        embeds: [{ title: '🛍️ Catalogue', description: 'No active services right now.', color: 0x7c5cff }],
+        components: [],
+      };
+    }
+    return {
+      embeds: [{
+        title: '🛍️ Catalogue',
+        description: 'Search with /catalog <text> — matches name, category, and platform.',
+        fields: list.map((p) => ({ name: p.platform, value: `${Number(p.n)} services`, inline: true })),
+        color: 0x7c5cff,
+      }],
+      components: [],
+    };
+  }
+  const like = `%${q}%`;
+  const where = `${active} AND (provider_name LIKE ? OR display_name LIKE ? OR category LIKE ? OR platform LIKE ?)`;
+  const totalRow = await db.prepare(`SELECT COUNT(*) AS n FROM services WHERE ${where}`).bind(like, like, like, like).first<{ n: number }>();
+  const total = Number(totalRow?.n ?? 0);
+  if (!total) {
+    return {
+      embeds: [{ title: '🛍️ Catalogue', description: `No services matching "${trunc(q, 100)}".`, color: 0x7c5cff }],
+      components: [],
+    };
+  }
+  const rows = await db.prepare(
+    `SELECT provider_name, display_name, category, platform, retail_rate, min, max, refill
+     FROM services WHERE ${where} ORDER BY retail_rate ASC LIMIT ?`,
+  ).bind(like, like, like, like, CATALOG_PAGE_SIZE).all();
+  const list = (rows.results ?? []) as unknown as CatalogServiceRow[];
+  return {
+    embeds: [{
+      title: '🛍️ Catalogue',
+      description: `Showing ${list.length} of ${total} matching "${trunc(q, 100)}" — cheapest first.`,
+      fields: list.map((s) => ({
+        name: trunc(s.display_name?.trim() || cleanName(s.provider_name), 100),
+        value: `${inr(s.retail_rate)} /1K · min ${s.min} – max ${s.max}${s.refill === 1 ? ' · refill' : ''} · ${s.platform} · ${s.category}`,
+        inline: false,
+      })),
+      color: 0x7c5cff,
+    }],
+    components: [],
   };
 }
