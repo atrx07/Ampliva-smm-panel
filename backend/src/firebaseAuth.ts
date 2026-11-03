@@ -1,14 +1,20 @@
 /**
  * Verify a Firebase Auth ID token (RS256 JWT) without the Admin SDK, which
- * needs Node APIs that don't run on Workers. We fetch Google's public certs
- * for securetoken, import the matching key with WebCrypto, and check the
+ * needs Node APIs that don't run on Workers. We fetch Google's JWKS for
+ * securetoken, import the matching RSA key with WebCrypto, and check the
  * signature plus the claims that bind the token to this project. The result
  * is only an identity proof: the Worker still mints its own local session,
  * so every existing endpoint keeps working unchanged.
+ *
+ * Lesson (2026-11-04): the x509 certs endpoint returns full X.509
+ * certificates, not bare public keys — importing one as 'spki' throws, so
+ * the key list came up empty and every real token 401'd even though the
+ * Google consent half had already succeeded. The JWKS endpoint returns the
+ * keys directly in JWK form, which WebCrypto imports as-is.
  */
 
 const FIREBASE_PROJECT_ID = 'ampliva-25036';
-const CERTS_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+const JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ISSUER = `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`;
 
 interface FirebaseClaims {
@@ -20,40 +26,40 @@ interface FirebaseClaims {
   email_verified?: boolean;
 }
 
-let cachedCerts: { keys: Map<string, CryptoKey>; fetchedAt: number } | null = null;
-
-function pemToDer(pem: string): ArrayBuffer {
-  const b64 = pem
-    .replace(/-----BEGIN CERTIFICATE-----/, '')
-    .replace(/-----END CERTIFICATE-----/, '')
-    .replace(/\s+/g, '');
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes.buffer;
+interface Jwk {
+  kty?: string;
+  kid?: string;
+  n?: string;
+  e?: string;
 }
 
+let cachedKeys: { keys: Map<string, CryptoKey>; fetchedAt: number } | null = null;
+
 async function getKey(kid: string): Promise<CryptoKey | null> {
-  const stale = !cachedCerts || Date.now() - cachedCerts.fetchedAt > 60 * 60 * 1000;
-  if (stale || !cachedCerts!.keys.has(kid)) {
+  const stale = !cachedKeys || Date.now() - cachedKeys.fetchedAt > 60 * 60 * 1000;
+  if (stale || !cachedKeys!.keys.has(kid)) {
     try {
-      const res = await fetch(CERTS_URL);
+      const res = await fetch(JWKS_URL);
       if (!res.ok) return null;
-      const json = (await res.json()) as Record<string, string>;
+      const json = (await res.json()) as { keys?: Jwk[] };
       const keys = new Map<string, CryptoKey>();
-      for (const [id, pem] of Object.entries(json)) {
+      for (const jwk of json.keys ?? []) {
+        if (jwk.kty !== 'RSA' || !jwk.kid || !jwk.n || !jwk.e) continue;
         try {
-          keys.set(id, await crypto.subtle.importKey('spki', pemToDer(pem), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']));
+          keys.set(
+            jwk.kid,
+            await crypto.subtle.importKey('jwk', { kty: 'RSA', n: jwk.n, e: jwk.e }, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']),
+          );
         } catch {
-          // Skip certs that don't parse; the matching kid is what matters.
+          // Skip keys that don't import; the matching kid is what matters.
         }
       }
-      cachedCerts = { keys, fetchedAt: Date.now() };
+      cachedKeys = { keys, fetchedAt: Date.now() };
     } catch {
       return null;
     }
   }
-  const certs = cachedCerts;
+  const certs = cachedKeys;
   if (!certs) return null;
   return certs.keys.get(kid) ?? null;
 }
