@@ -519,39 +519,15 @@ function publicUser(user: { id: string; email: string; role: string }) {
   return { id: user.id, email: user.email, role: user.role };
 }
 
+// Registration policy (2026-11-04): local email/password signup is CLOSED.
+// Every new manual registration must go through email verification, which
+// the Firebase verified-email mode provides; Google sign-in already counts
+// as verified (Google proves the email, and /api/auth/firebase enforces
+// email_verified). This stub stays so stale clients get a clear message
+// instead of a silent failure, and so the endpoint can never again mint an
+// unverified account - including via a direct POST that bypasses the UI.
 app.post('/api/auth/register', async (c) => {
-  if (!c.env.DB) return c.json({ error: 'Accounts are not enabled yet (database not configured).' }, 503);
-  const body: { email?: string; password?: string } = await c.req.json<{ email?: string; password?: string }>().catch(() => ({}));
-  const email = String(body.email || '').trim().toLowerCase();
-  const password = String(body.password || '');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'Enter a valid email address.' }, 400);
-  if (password.length < 8) return c.json({ error: 'Password must be at least 8 characters.' }, 400);
-
-  const existing = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
-  if (existing) return c.json({ error: 'An account with this email already exists. Try logging in.' }, 409);
-
-  const countRow = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
-  const isFirstUser = Number(countRow?.n ?? 0) === 0;
-  const adminEmail = (c.env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const role = isFirstUser || (adminEmail && email === adminEmail) ? 'admin' : 'user';
-
-  const { hash, salt } = await hashPassword(password);
-  const user: UserRow = {
-    id: newId('usr'),
-    email,
-    password_hash: hash,
-    password_salt: salt,
-    role: role as UserRow['role'],
-    created_at: new Date().toISOString(),
-  };
-  await c.env.DB
-    .prepare('INSERT INTO users (id, email, password_hash, password_salt, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(user.id, user.email, user.password_hash, user.password_salt, user.role, user.created_at)
-    .run();
-
-  const ttl = Number(c.env.SESSION_TTL_DAYS || '30');
-  const token = await createSession(c.env.DB, user.id, Number.isFinite(ttl) ? ttl : 30);
-  return c.json({ token, user: publicUser(user) }, 201);
+  return c.json({ error: 'New accounts must verify their email first. Use the verified-email signup or continue with Google.' }, 403);
 });
 
 app.post('/api/auth/login', async (c) => {
