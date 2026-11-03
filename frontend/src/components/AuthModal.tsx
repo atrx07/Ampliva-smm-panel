@@ -142,7 +142,7 @@ export function AuthModal({ onClose, onAuthed }: { onClose: () => void; onAuthed
             <p className="modal-sub">Sign up or log in with an email address you verify. A verified sign-in links to your existing account when the email matches.</p>
             {firebaseStep === 'pending' ? (
               <div className="form-stack">
-                <div className="notice">Verification link sent to {email}. Click the link in your inbox, then continue below.</div>
+                <div className="notice">Verification link sent to {email}. Click the link in your inbox, then continue below. Can’t find it? Check your spam folder too — verification mails from a new sender sometimes land there.</div>
                 {info && <div className="notice">{info}</div>}
                 {error && <div className="notice error">{error}</div>}
                 <button className="primary-button full" type="button" disabled={busy} onClick={firebaseContinue}>{busy ? 'Please wait…' : 'I’ve verified — continue'}</button>
