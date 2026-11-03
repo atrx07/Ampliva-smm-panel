@@ -80,6 +80,10 @@ export function login(email: string, password: string): Promise<AuthResponse> {
   return api<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
 }
 
+export function firebaseLogin(idToken: string): Promise<AuthResponse> {
+  return api<AuthResponse>('/api/auth/firebase', { method: 'POST', body: JSON.stringify({ idToken }) });
+}
+
 export function logout(): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/api/auth/logout', { method: 'POST' });
 }

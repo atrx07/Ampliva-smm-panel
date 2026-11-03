@@ -38,6 +38,7 @@ body::before {
 nav { display: flex; align-items: center; gap: 26px; color: #c3c7d2; font-size: 0.92rem; }
 nav a:hover { color: white; }
 .ghost-button { color: #d9d7e0; border: 1px solid var(--line); background: rgba(255,255,255,.035); border-radius: 999px; padding: 9px 14px; }
+.auth-google { width: 100%; margin-top: 14px; }
 
 .hero { padding: 108px 0 84px; }
 .eyebrow { display: inline-flex; color: #c4baff; font-size: 0.78rem; font-weight: 750; text-transform: uppercase; letter-spacing: 0.15em; }

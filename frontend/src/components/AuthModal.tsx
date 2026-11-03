@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { login, register, setToken } from '../api';
+import { firebaseLogin, login, register, setToken } from '../api';
+import { signInWithGoogleIdToken } from '../lib/firebase';
 import type { AuthUser } from '../types';
 
 export function AuthModal({ onClose, onAuthed }: { onClose: () => void; onAuthed: (user: AuthUser) => void }) {
@@ -24,6 +25,21 @@ export function AuthModal({ onClose, onAuthed }: { onClose: () => void; onAuthed
     }
   }
 
+  async function googleSignIn() {
+    setBusy(true);
+    setError(null);
+    try {
+      const idToken = await signInWithGoogleIdToken();
+      const result = await firebaseLogin(idToken);
+      setToken(result.token);
+      onAuthed(result.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Google sign-in failed. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -35,6 +51,8 @@ export function AuthModal({ onClose, onAuthed }: { onClose: () => void; onAuthed
           {error && <div className="notice error">{error}</div>}
           <button className="primary-button full" type="submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'register' ? 'Sign up' : 'Log in'}</button>
         </form>
+        <button className="ghost-button auth-google" type="button" disabled={busy} onClick={googleSignIn}>Continue with Google</button>
+        <p className="modal-sub">Google sign-in links to your existing account when the email matches.</p>
         <button className="link-button" onClick={() => setMode(mode === 'register' ? 'login' : 'register')}>
           {mode === 'register' ? 'Already have an account? Log in' : 'New here? Create an account'}
         </button>

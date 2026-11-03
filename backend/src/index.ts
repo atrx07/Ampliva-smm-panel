@@ -2,11 +2,12 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { listDbServices, normalizeServiceType, normalizeServices, previewServices, retailFor, rowToPublic, syncCatalogToDb } from './catalog';
 import { cidClientFromEnv } from './providers/cid';
-import { createSession, destroySession, hashPassword, isResponse, newId, requireAdmin, requireAuth, verifyPassword } from './auth';
+import { createSession, destroySession, hashPassword, isResponse, newId, randomHex, requireAdmin, requireAuth, verifyPassword } from './auth';
 import { appendLedger, getBalance } from './wallet';
 import { notifyDiscord, notifyOrderPlaced, notifyRefillSubmitted } from './notify';
 import { buildCatalogMessage, buildInspectMessage, buildOrdersMessage, buildPendingMessage, buildRefillsMessage, buildStatsMessage, buildUserDossier, buildUsersMessage, findOrder, notifyTopupRequest, orderEmbed, registerDiscordCommands, verifyDiscordSignature } from './discord';
 import { createRazorpayOrder, razorpayConfigured, verifyRazorpaySignature } from './razorpay';
+import { verifyFirebaseIdToken } from './firebaseAuth';
 import type { Env, OrderRow, RefillRequest, ServiceRow, UserRow } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -581,6 +582,60 @@ app.get('/api/auth/me', async (c) => {
   if (isResponse(user)) return user;
   const balance = c.env.DB ? await getBalance(c.env.DB, user.id) : 0;
   return c.json({ user, balance, currency: c.env.CID_CURRENCY || 'INR' });
+});
+
+// Firebase sign-in (Google, and later Firebase email): the ID token proves a
+// verified email; the Worker then links it to the local account BY THAT
+// EMAIL and mints the usual local session. Local email/password login is
+// untouched, and a Firebase login never creates a second account for an
+// existing email — that link-back is the whole point of this endpoint.
+app.post('/api/auth/firebase', async (c) => {
+  if (!c.env.DB) return c.json({ error: 'Accounts are not enabled yet (database not configured).' }, 503);
+  const body: { idToken?: string } = await c.req.json<{ idToken?: string }>().catch(() => ({}));
+  const verified = await verifyFirebaseIdToken(String(body.idToken || ''));
+  if (!verified) return c.json({ error: 'Invalid sign-in. Try again.' }, 401);
+  const db = c.env.DB;
+  let user = await db.prepare('SELECT * FROM users WHERE email = ?').bind(verified.email).first<UserRow>();
+  if (!user) {
+    const countRow = await db.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
+    const isFirstUser = Number(countRow?.n ?? 0) === 0;
+    const adminEmail = (c.env.ADMIN_EMAIL || '').trim().toLowerCase();
+    const role = isFirstUser || (adminEmail && verified.email === adminEmail) ? 'admin' : 'user';
+    // Local password is a random secret nobody knows: Firebase accounts log
+    // in through Firebase, never through the local password form.
+    const { hash, salt } = await hashPassword(randomHex(32));
+    const created: UserRow = {
+      id: newId('usr'),
+      email: verified.email,
+      password_hash: hash,
+      password_salt: salt,
+      role: role as UserRow['role'],
+      created_at: new Date().toISOString(),
+    };
+    // Pre-migration tolerance: firebase_uid arrives with 0008; until the
+    // owner pastes it, the account still works and links again on the next
+    // Firebase login.
+    try {
+      await db.prepare('INSERT INTO users (id, email, password_hash, password_salt, role, created_at, firebase_uid) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(created.id, created.email, created.password_hash, created.password_salt, created.role, created.created_at, verified.uid).run();
+    } catch {
+      await db.prepare('INSERT INTO users (id, email, password_hash, password_salt, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(created.id, created.email, created.password_hash, created.password_salt, created.role, created.created_at).run();
+    }
+    user = created;
+  } else if (!user.firebase_uid) {
+    // Link a pre-Firebase local account the first time its owner signs in
+    // with Firebase. A later UID never overwrites an existing link, and a
+    // UID mismatch never blocks login — the verified email is the key.
+    try {
+      await db.prepare('UPDATE users SET firebase_uid = ? WHERE id = ? AND firebase_uid IS NULL').bind(verified.uid, user.id).run();
+    } catch {
+      // Pre-migration: no firebase_uid column yet; login still succeeds.
+    }
+  }
+  const ttl = Number(c.env.SESSION_TTL_DAYS || '30');
+  const token = await createSession(db, user.id, Number.isFinite(ttl) ? ttl : 30);
+  return c.json({ token, user: publicUser(user) });
 });
 
 // ---------- wallet ----------

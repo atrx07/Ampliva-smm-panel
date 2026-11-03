@@ -95,6 +95,7 @@ export interface UserRow {
   password_salt: string;
   role: 'user' | 'admin';
   created_at: string;
+  firebase_uid?: string | null;
 }
 
 export interface OrderRow {
