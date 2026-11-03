@@ -58,7 +58,11 @@ export async function firebaseContinueAfterVerification(email: string, password:
   if (!user) user = (await signInWithEmailAndPassword(auth, email, password)).user;
   else await user.reload();
   if (!user.emailVerified) throw new Error('not-verified');
-  return user.getIdToken();
+  // Force a fresh token: claims (including email_verified) are stamped at
+  // mint time, so the cached token from signup still says unverified even
+  // after reload() confirms the email is verified. A plain getIdToken()
+  // returns that stale token and the Worker rightly rejects it.
+  return user.getIdToken(true);
 }
 
 /** Re-sends the verification link to the signed-in (or just-signed-in) user. */
