@@ -527,7 +527,7 @@ function publicUser(user: { id: string; email: string; role: string }) {
 // instead of a silent failure, and so the endpoint can never again mint an
 // unverified account - including via a direct POST that bypasses the UI.
 app.post('/api/auth/register', async (c) => {
-  return c.json({ error: 'New accounts must verify their email first. Use the verified-email signup or continue with Google.' }, 403);
+  return c.json({ error: 'New accounts are created from the signup form. Please create an account there or continue with Google.' }, 403);
 });
 
 app.post('/api/auth/login', async (c) => {
