@@ -27,6 +27,9 @@ export interface Env {
   RAZORPAY_WEBHOOK_SECRET?: string;
   /** Instagram Tools: Apify API token for profile lookups (dashboard Secret; lookups answer 503 until set). */
   APIFY_TOKEN?: string;
+  /** Bearer token for the agent-only stats endpoint (GET /api/agent-stats).
+   *  Dashboard Secret; the endpoint answers 503 until set. Never in git. */
+  AGENT_STATS_TOKEN?: string;
   SESSION_TTL_DAYS?: string;
 }
 

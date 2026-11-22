@@ -1107,6 +1107,72 @@ app.post('/api/orders/:id/cancel', async (c) => {
   }
 });
 
+// ---------- agent (token-gated) ----------
+
+// Constant-time string comparison so a wrong token reveals nothing about
+// the real one through timing. Lengths are folded into the diff (a length
+// mismatch alone leaks only the token length, which is not secret).
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  let diff = ab.length ^ bb.length;
+  const len = Math.max(ab.length, bb.length);
+  for (let i = 0; i < len; i++) {
+    diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+// Agent-only stats: the full /api/admin/stats payload (users, orders,
+// revenue, provider cost, refunds, margin, pending top-ups, provider
+// balance) behind a bearer token, so the owner's agent can read status
+// without an admin session. NOT public: without the token it answers 401
+// and leaks nothing. The token is a dashboard Secret (AGENT_STATS_TOKEN);
+// until it is set the endpoint answers 503. Deliberately separate from
+// /api/admin/stats so admin auth stays untouched.
+app.get('/api/agent-stats', async (c) => {
+  const secret = c.env.AGENT_STATS_TOKEN;
+  if (!secret) return c.json({ error: 'Agent stats not configured' }, 503);
+  const header = c.req.header('Authorization') ?? '';
+  const presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+  if (!presented || !timingSafeEqual(presented, secret)) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  if (!c.env.DB) return c.json({ error: 'Database not configured' }, 503);
+  const db = c.env.DB;
+  const users = await db.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
+  const services = await db.prepare('SELECT COUNT(*) AS n FROM services WHERE is_active = 1 AND provider_active = 1').first<{ n: number }>();
+  const orders = await db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(charge), 0) AS revenue,
+     COALESCE(SUM(COALESCE(provider_cost * (charge - refund_amount) / NULLIF(charge, 0), provider_cost)), 0) AS cost,
+     COALESCE(SUM(refund_amount), 0) AS refunds,
+     COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) AS successful,
+     COALESCE(SUM(CASE WHEN status IN ('Canceled', 'Cancelled') THEN 1 ELSE 0 END), 0) AS failed
+     FROM orders`,
+  ).first<{ n: number; revenue: number; cost: number; refunds: number; successful: number; failed: number }>();
+  const pendingTopups = await db.prepare("SELECT COUNT(*) AS n FROM payment_requests WHERE status = 'pending'").first<{ n: number }>();
+  let providerBalance: number | null = null;
+  const client = cidClientFromEnv(c.env);
+  if (client) {
+    try { providerBalance = (await client.balance()).balance; } catch { providerBalance = null; }
+  }
+  return c.json({
+    users: Number(users?.n ?? 0),
+    activeServices: Number(services?.n ?? 0),
+    orders: Number(orders?.n ?? 0),
+    successfulOrders: Number(orders?.successful ?? 0),
+    failedOrders: Number(orders?.failed ?? 0),
+    revenue: round2(Number(orders?.revenue ?? 0)),
+    providerCost: round2(Number(orders?.cost ?? 0)),
+    refunds: round2(Number(orders?.refunds ?? 0)),
+    grossMargin: round2(Number(orders?.revenue ?? 0) - Number(orders?.cost ?? 0) - Number(orders?.refunds ?? 0)),
+    pendingTopups: Number(pendingTopups?.n ?? 0),
+    providerBalance,
+    currency: c.env.CID_CURRENCY || 'INR',
+  });
+});
+
 // ---------- admin ----------
 
 app.post('/api/admin/sync', async (c) => {
